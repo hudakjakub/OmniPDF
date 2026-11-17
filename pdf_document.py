@@ -232,6 +232,24 @@ class PdfDocument:
         self._last_replace = None
         return color
 
+    def transform_region(self, page_index, bbox, destination, baseline):
+        current = self.document.tobytes()
+        revision = self._revision
+        self._restore(baseline)
+        try:
+            if destination is not None and pymupdf.Rect(bbox) == pymupdf.Rect(destination):
+                self._undo.append((current, revision))
+                self._redo.clear()
+                self._revision = object()
+                self._last_replace = None
+            else:
+                self.cover_region(page_index, bbox, destination)
+                self._undo[-1] = (current, revision)
+        except Exception:
+            self._restore(current)
+            self._revision = revision
+            raise
+
     def replace_text(self, page_index, bbox, text, fontsize=11, color=0, background=True, *, update_previous=False, insert_only=False):
         if update_previous:
             if (not self._undo or not self._last_replace

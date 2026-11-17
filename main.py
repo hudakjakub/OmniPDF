@@ -81,6 +81,7 @@ class PageView(QGraphicsView):
         self.area_bbox = None
         self.area_page = None
         self.area_drag = None
+        self.area_preview = None
         self.start_point = None
         self.region_mode = False
         self.anchor_cursor = None
@@ -100,6 +101,7 @@ class PageView(QGraphicsView):
 
     def reset_document(self):
         self.scene().clear()
+        self.area_preview = None
         self.page_rects = []
         self.page_items = []
         self.page_scales = {}
@@ -331,6 +333,16 @@ class PageView(QGraphicsView):
                 x = -1 if abs(point.x() - rect.left()) <= margin else 1 if abs(point.x() - rect.right()) <= margin else 0
                 y = -1 if abs(point.y() - rect.top()) <= margin else 1 if abs(point.y() - rect.bottom()) <= margin else 0
                 self.area_drag = (QRectF(rect), x, y)
+                pixels = QRectF((rect.left() - self.page_rect.left()) * self.raster_scale,
+                                (rect.top() - self.page_rect.top()) * self.raster_scale,
+                                rect.width() * self.raster_scale, rect.height() * self.raster_scale).toAlignedRect()
+                pixmap = self.pixmap_item.pixmap().copy(pixels)
+                if not pixmap.isNull():
+                    self.area_preview = self.scene().addPixmap(pixmap)
+                    self.area_preview.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+                    self.area_preview.setZValue(1.5)
+                    self.area_preview.setPos(rect.topLeft())
+                    self.area_preview.setTransform(QTransform.fromScale(rect.width() / pixmap.width(), rect.height() / pixmap.height()))
                 self.start_point = point
                 return
         self.start_point = point
@@ -364,7 +376,12 @@ class PageView(QGraphicsView):
             else:
                 rect = QRectF(self.start_point, point).normalized().intersected(self.page_rect)
             bbox = pymupdf.Rect(rect.x() - self.page_rect.x(), rect.y() - self.page_rect.y(), rect.right() - self.page_rect.x(), rect.bottom() - self.page_rect.y()) * self.derotation
-            if self.area_drag: self.highlight_area(tuple(bbox))
+            if self.area_drag:
+                if self.area_preview is not None:
+                    pixmap = self.area_preview.pixmap()
+                    self.area_preview.setPos(rect.topLeft())
+                    self.area_preview.setTransform(QTransform.fromScale(rect.width() / pixmap.width(), rect.height() / pixmap.height()))
+                self.highlight_area(tuple(bbox))
             else: self.highlight(tuple(bbox))
         elif self.start_point is not None and self.anchor_cursor is not None:
             point = self.mapToScene(event.position().toPoint())
@@ -383,6 +400,9 @@ class PageView(QGraphicsView):
             if self.area_drag:
                 self.area_drag = None
                 self.start_point = None
+                if self.area_preview is not None:
+                    self.scene().removeItem(self.area_preview)
+                    self.area_preview = None
                 self.area_changed.emit(self.area_bbox)
                 return
             if not self.region_mode:
@@ -1400,7 +1420,8 @@ class Editor(QMainWindow):
             if not self._discard_pending():
                 self.restore_highlight()
                 return
-            self.selection = {'kind': 'area', 'bbox': bbox, 'page_index': self.page_index}
+            self.selection = {'kind': 'area', 'bbox': bbox, 'page_index': self.page_index,
+                              'source_bbox': bbox, 'source_ocr': list(self.ocr_areas.get(self.page_index, []))}
             self.pending = False
             self.edit_applied = False
             self.text.blockSignals(True)
@@ -1422,18 +1443,21 @@ class Editor(QMainWindow):
     def transform_area(self, bbox):
         if not self.selection or self.selection.get('kind') != 'area':
             return
-        original = self.selection['bbox']
-        if pymupdf.Rect(original) == pymupdf.Rect(bbox):
+        previous = self.selection['bbox']
+        if pymupdf.Rect(previous) == pymupdf.Rect(bbox):
             return
         index = self.selection['page_index']
+        baseline = self.selection.get('baseline') or self.pdf.document.tobytes()
+        original = self.selection['source_bbox']
         try:
-            self.pdf.cover_region(index, original, bbox)
+            self.pdf.transform_region(index, original, bbox, baseline)
         except Exception as exc:
             self.restore_highlight()
             self._error(exc)
             return
-        affected = pymupdf.Rect(original) | pymupdf.Rect(bbox)
-        self.ocr_areas[index] = [s for s in self.ocr_areas.get(index, []) if not affected.intersects(pymupdf.Rect(s['bbox']))]
+        affected = (pymupdf.Rect(original), pymupdf.Rect(bbox))
+        self.ocr_areas[index] = [s for s in self.selection['source_ocr'] if not any(rect.intersects(pymupdf.Rect(s['bbox'])) for rect in affected)]
+        self.selection['baseline'] = baseline
         self.selection['bbox'] = bbox
         self.render_page()
         self.statusBar().showMessage('Oblasť bola upravená. Zmenu môžete vrátiť tlačidlom Späť.')
@@ -1454,6 +1478,9 @@ class Editor(QMainWindow):
         self.view.area_bbox = None
         self.view.area_page = None
         self.view.area_drag = None
+        if self.view.area_preview is not None:
+            self.view.scene().removeItem(self.view.area_preview)
+            self.view.area_preview = None
         self.selection = None
         self.selection_preview.hide()
         self.pending = False
@@ -1493,7 +1520,11 @@ class Editor(QMainWindow):
         index = self.selection['page_index']
         try:
             if self.selection.get('kind') == 'area':
-                self.pdf.cover_region(index, self.selection['bbox'])
+                if 'baseline' in self.selection:
+                    self.pdf.transform_region(index, self.selection['source_bbox'], None, self.selection['baseline'])
+                    self.ocr_areas[index] = self.selection['source_ocr']
+                else:
+                    self.pdf.cover_region(index, self.selection['bbox'])
             elif 'characters' in self.selection:
                 self.pdf.delete_characters(index, self.selection['characters'])
             elif self.selection.get('insert_only') and not self.edit_applied:
@@ -1504,7 +1535,7 @@ class Editor(QMainWindow):
         except Exception as exc:
             self._error(exc)
             return
-        rect = pymupdf.Rect(self.selection['bbox'])
+        rect = pymupdf.Rect(self.selection.get('source_bbox', self.selection['bbox']))
         self.ocr_areas[index] = [s for s in self.ocr_areas.get(index, []) if not rect.intersects(pymupdf.Rect(s['bbox']))]
         self.clear_selection()
         self.render_page()

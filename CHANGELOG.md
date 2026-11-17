@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Preserve covered content when moving an area again and show the area while dragging.
+
 ## 0.1.1
 
 - Allow removing the last page and adding a PDF to an empty document, with undo and redo.

@@ -616,6 +616,62 @@ class EditorTests(unittest.TestCase):
         window.undo()
         self.assertAlmostEqual(window.pdf.spans(0)[0]['bbox'][0], 50, delta=1)
 
+    def test_area_move_back_preserves_covered_content_and_shows_drag_preview(self):
+        window = self.window
+        view = window.view
+        window.cover_button.click()
+        source = pymupdf.Rect(window.pdf.spans(0)[0]['bbox']) + (-2, -2, 2, 2)
+        destination = source + (0, 60, 0, 60)
+        ocr = {'text': 'TOTAL', 'bbox': (50, 125, 165, 145)}
+        window.ocr_areas[0] = [ocr]
+        window.select_region(tuple(source))
+        original = window.pdf.document[0].get_pixmap().samples
+        start = view.mapFromScene(view.display_rect(source).center())
+        end = view.mapFromScene(view.display_rect(destination).center())
+        QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(view.viewport(), end)
+        self.assertIsNotNone(view.area_preview)
+        self.assertFalse(view.area_preview.pixmap().isNull())
+        self.assertAlmostEqual(view.area_preview.sceneBoundingRect().center().y(),
+                               view.display_rect(destination).center().y(), delta=2)
+        QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
+        self.assertIsNone(view.area_preview)
+        window.transform_area(tuple(source))
+        self.assertIn('TOTAL 120.00 EUR', window.pdf.document[0].get_text())
+        self.assertEqual(window.pdf.document[0].get_pixmap().samples, original)
+        self.assertEqual(window.ocr_areas[0], [ocr])
+        window.undo()
+        self.assertIn('TOTAL 120.00 EUR', window.pdf.document[0].get_text())
+
+    def test_delete_moved_area_preserves_content_under_destination(self):
+        window = self.window
+        window.cover_button.click()
+        source = pymupdf.Rect(window.pdf.spans(0)[0]['bbox']) + (-2, -2, 2, 2)
+        window.select_region(tuple(source))
+        window.transform_area(tuple(source + (0, 60, 0, 60)))
+        window.delete_selection()
+        text = window.pdf.document[0].get_text()
+        self.assertIn('TOTAL 120.00 EUR', text)
+        self.assertNotIn('INVOICE', text)
+
+    def test_failed_area_move_restores_previous_document(self):
+        window = self.window
+        window.cover_button.click()
+        source = pymupdf.Rect(window.pdf.spans(0)[0]['bbox']) + (-2, -2, 2, 2)
+        window.select_region(tuple(source))
+        window.transform_area(tuple(source + (0, 60, 0, 60)))
+        with pymupdf.open('pdf', window.pdf.document.tobytes()) as snapshot:
+            before = snapshot[0].get_pixmap().samples
+        selected = window.selection['bbox']
+        with patch.object(window.pdf, 'cover_region', side_effect=ValueError('failed')):
+            with patch.object(window, '_error') as error:
+                window.transform_area(tuple(source + (0, 100, 0, 100)))
+        error.assert_called_once()
+        self.assertEqual(window.pdf.document[0].get_pixmap().samples, before)
+        self.assertEqual(window.selection['bbox'], selected)
+        window.undo()
+        self.assertIn('INVOICE 12345', window.pdf.document[0].get_text())
+
     def test_area_move_on_rotated_page(self):
         path = self.root / 'rotated-area.pdf'
         with pymupdf.open() as doc:
