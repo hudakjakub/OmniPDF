@@ -55,7 +55,7 @@ EN = {
     'Kópia strany bola vložená za pôvodnú stranu.': 'A copy was inserted after the original page.',
     'Vložiť PDF za aktuálnu stranu': 'Insert PDF after current page',
     'Strany z PDF boli vložené. Výsledok uložte ako kópiu.': 'PDF pages inserted. Save the result as a copy.',
-    'Ťahaním myši nakreslite nové textové pole.': 'Drag to draw a new text box.',
+    'Kliknutím vložte textové pole alebo ho nakreslite ťahaním myši.': 'Click to insert a text box or drag to draw one.',
     'Kliknite na text na strane.': 'Click text on the page.',
     'Označte oblasť. Presuňte ju, zmeňte jej veľkosť alebo ju odstráňte klávesom Delete.': 'Select an area. Move or resize it, or press Delete to remove it.',
     'Text sa po dopísaní automaticky zmení v náhľade. Delete na strane vymaže výber. PDF uložíte tlačidlom Uložiť kópiu.': 'The preview updates automatically after typing. Press Delete on the page to remove the selection. Use Save a copy to save the PDF.',

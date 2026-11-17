@@ -58,6 +58,66 @@ class EditorTests(unittest.TestCase):
         self.window.close()
         self.temp.cleanup()
 
+    def test_click_creates_text_box_ready_for_typing(self):
+        window = self.window
+        view = window.view
+        window.region_button.click()
+        point = view.mapFromScene(view.display_rect((200, 200, 200, 200)).topLeft())
+        QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+        self.assertTrue(window.selection['insert_only'])
+        rect = pymupdf.Rect(window.selection['bbox'])
+        self.assertGreaterEqual(rect.width, 100)
+        self.assertGreaterEqual(rect.height, 20)
+        self.assertTrue(window.text.hasFocus())
+        QTest.keyClicks(window.text, 'Hello')
+        self.assertTrue(window.apply_change())
+        self.assertIn('Hello', window.pdf.document[0].get_text())
+        window.undo()
+        window.cover_button.click()
+        QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+        self.assertIsNone(window.selection)
+        self.assertFalse(window.pdf.dirty)
+
+    def test_click_text_box_fits_page_edges_including_rotated_page(self):
+        window = self.window
+        path = self.root / 'rotated-text-box.pdf'
+        with pymupdf.open() as doc:
+            page = doc.new_page(width=500, height=700)
+            page.insert_text((50, 80), 'Text')
+            page.set_rotation(90)
+            doc.save(path)
+        for source in (self.source, path):
+            window.open_file(path=source)
+            window.region_button.setChecked(True)
+            view = window.view
+            point = view.page_rect.bottomRight() - QPointF(5, 5)
+            view.centerOn(point)
+            self.app.processEvents()
+            QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=view.mapFromScene(point))
+            box = pymupdf.Rect(window.selection['bbox'])
+            page = window.pdf.document[0]
+            self.assertTrue((page.rect * page.derotation_matrix).contains(box))
+            self.assertGreaterEqual(box.get_area(), 100 * 20)
+            self.assertTrue(window.text.hasFocus())
+            QTest.keyClicks(window.text, 'Hi')
+            self.assertTrue(window.apply_change())
+            self.assertIn('Hi', window.pdf.document[0].get_text())
+            window.undo()
+            window.cancel_selection()
+
+    def test_drag_still_sets_custom_text_box_size(self):
+        window = self.window
+        view = window.view
+        window.region_button.click()
+        start = view.mapFromScene(view.display_rect((100, 200, 100, 200)).topLeft())
+        end = view.mapFromScene(view.display_rect((180, 240, 180, 240)).topLeft())
+        QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(view.viewport(), end)
+        QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
+        box = pymupdf.Rect(window.selection['bbox'])
+        self.assertAlmostEqual(box.width, 80, delta=3)
+        self.assertAlmostEqual(box.height, 40, delta=3)
+
     def test_standard_save_and_zoom_shortcuts(self):
         window = self.window
         view = window.view

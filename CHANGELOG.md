@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.7
+
+- Create a ready-to-type text box with a single click.
+
 ## 0.1.6
 
 - Allow signed PDFs after explicit confirmation that saving a copy invalidates signatures.

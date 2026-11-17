@@ -86,6 +86,7 @@ class PageView(QGraphicsView):
         self.area_preview = None
         self.start_point = None
         self.region_mode = False
+        self.click_to_insert = False
         self.anchor_cursor = None
         self.dragging_text = False
         self.pressed_span = None
@@ -290,8 +291,9 @@ class PageView(QGraphicsView):
         first, last = sorted((self.anchor_cursor, cursor))
         return self.characters[first:last]
 
-    def set_region_mode(self, enabled):
+    def set_region_mode(self, enabled, *, click_to_insert=False):
         self.region_mode = enabled
+        self.click_to_insert = click_to_insert
         self.setCursor(Qt.CursorShape.CrossCursor if enabled else Qt.CursorShape.ArrowCursor)
 
     def _area_hit(self, point):
@@ -443,6 +445,12 @@ class PageView(QGraphicsView):
                 self.start_point = None
                 return
             rect = QRectF(self.start_point, point).normalized().intersected(self.page_rect)
+            if self.click_to_insert and (point - self.start_point).manhattanLength() * self.transform().m11() < QApplication.startDragDistance():
+                width = min(160, self.page_rect.width())
+                height = min(24, self.page_rect.height())
+                x = min(max(self.start_point.x(), self.page_rect.left()), self.page_rect.right() - width)
+                y = min(max(self.start_point.y(), self.page_rect.top()), self.page_rect.bottom() - height)
+                rect = QRectF(x, y, width, height)
             self.start_point = None
             if rect.width() >= 6 and rect.height() >= 6:
                 bbox = pymupdf.Rect(rect.x() - self.page_rect.x(), rect.y() - self.page_rect.y(), rect.right() - self.page_rect.x(), rect.bottom() - self.page_rect.y()) * self.derotation
@@ -1360,16 +1368,16 @@ class Editor(QMainWindow):
     def _region_toggled(self, enabled):
         if enabled:
             self.cover_button.setChecked(False)
-        self.view.set_region_mode(enabled)
+        self.view.set_region_mode(enabled, click_to_insert=enabled)
         if self.pdf:
-            self.statusBar().showMessage(_('Ťahaním myši nakreslite nové textové pole.') if enabled else _('Kliknite na text na strane.'))
+            self.statusBar().showMessage(_('Kliknutím vložte textové pole alebo ho nakreslite ťahaním myši.') if enabled else _('Kliknite na text na strane.'))
 
     def _cover_toggled(self, enabled):
         if enabled:
             self.region_button.setChecked(False)
         elif self.selection and self.selection.get('kind') == 'area':
             self.clear_selection()
-        self.view.set_region_mode(enabled or self.region_button.isChecked())
+        self.view.set_region_mode(enabled or self.region_button.isChecked(), click_to_insert=self.region_button.isChecked())
         if self.pdf and enabled:
             self.statusBar().showMessage(_('Označte oblasť. Presuňte ju, zmeňte jej veľkosť alebo ju odstráňte klávesom Delete.'))
 
