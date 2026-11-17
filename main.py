@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QListWidget, QListWidgetItem
 from pdf_document import PdfDocument
 from windows_ocr import recognize
 from app_info import APP_NAME, VERSION, PROJECT_URL
+from i18n import _, configure_language
 import updates
 from window_chrome import configure_title_bar, set_app_id, create_app_mutex, release_app_mutex
 
@@ -47,6 +48,7 @@ ERRORS = {
     'The saved PDF could not be verified.': 'Uložené PDF sa nepodarilo overiť.',
     'The selected text is no longer available.': 'Výber už nie je aktuálny. Označte text znova.',
     'Select text to delete.': 'Najprv označte text, ktorý chcete vymazať.',
+    'There is no previous edit to update.': 'Predchádzajúcu úpravu už nemožno aktualizovať.',
 }
 
 
@@ -71,7 +73,7 @@ class PageView(QGraphicsView):
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAccessibleName('Strana PDF. Ťahaním označte text, klávesom Delete ho vymažte.')
+        self.setAccessibleName(_('Strana PDF. Ťahaním označte text, klávesom Delete ho vymažte.'))
         self.areas = []
         self.characters = []
         self.page_rect = QRectF()
@@ -538,8 +540,8 @@ class AppendPdfCard(QWidget):
         self.button = QPushButton('+', self)
         self.button.setObjectName('appendPdf')
         self.button.setFixedSize(114, 160)
-        self.button.setToolTip('Pridať PDF na koniec — kliknite alebo sem pretiahnite PDF')
-        self.button.setAccessibleName('Pridať PDF na koniec dokumentu')
+        self.button.setToolTip(_('Pridať PDF na koniec — kliknite alebo sem pretiahnite PDF'))
+        self.button.setAccessibleName(_('Pridať PDF na koniec dokumentu'))
         self.button.clicked.connect(callback)
 
     def resizeEvent(self, event):
@@ -680,11 +682,11 @@ class Editor(QMainWindow):
         brand.setText(APP_NAME)
         brand.setObjectName('brand')
         brand.setToolTip(f'{APP_NAME} {VERSION}')
-        brand.setAccessibleName('Ponuka aplikácie Omni PDF')
+        brand.setAccessibleName(_('Ponuka aplikácie Omni PDF'))
         self.app_menu = QMenu(self)
-        self.app_menu.addAction('O aplikácii…', self.show_about)
-        self.check_updates_action = self.app_menu.addAction('Skontrolovať aktualizácie…', self.check_updates)
-        self.auto_update_action = self.app_menu.addAction('Automatické aktualizácie')
+        self.app_menu.addAction(_('O aplikácii…'), self.show_about)
+        self.check_updates_action = self.app_menu.addAction(_('Skontrolovať aktualizácie…'), self.check_updates)
+        self.auto_update_action = self.app_menu.addAction(_('Automatické aktualizácie'))
         self.auto_update_action.setCheckable(True)
         self.auto_update_action.setChecked(self.settings.value('updates/automatic', True, type=bool))
         self.auto_update_action.setEnabled(bool(getattr(sys, 'frozen', False)))
@@ -692,55 +694,55 @@ class Editor(QMainWindow):
         brand.setMenu(self.app_menu)
         brand.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         row.addWidget(brand)
-        logo.setToolTip(f'{APP_NAME} · Editor PDF\nSúbory zostávajú v počítači')
-        self.file_label = QLabel('PDF, JPG alebo PNG')
+        logo.setToolTip(_('{name} · Editor PDF\nSúbory zostávajú v počítači').format(name=APP_NAME))
+        self.file_label = QLabel(_('PDF, JPG alebo PNG'))
         self.file_label.setObjectName('filename')
         self.file_label.setMinimumWidth(80)
         self.file_label.setMaximumWidth(160)
         self.file_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         row.addWidget(self.file_label, 1)
-        self.open_button = self._tool_button('Otvoriť súbor (Ctrl+O)', 'open', self.open_file, row)
-        self.save_button = self._tool_button('Uložiť kópiu (Ctrl+S alebo Ctrl+Shift+S)', 'save', self.save_copy, row)
+        self.open_button = self._tool_button(_('Otvoriť súbor (Ctrl+O)'), 'open', self.open_file, row)
+        self.save_button = self._tool_button(_('Uložiť kópiu (Ctrl+S alebo Ctrl+Shift+S)'), 'save', self.save_copy, row)
         self._toolbar_separator(row)
-        self.undo_button = self._tool_button('Späť (Ctrl+Z)', 'undo', self.undo, row)
-        self.redo_button = self._tool_button('Dopredu (Ctrl+Y)', 'redo', self.redo, row)
+        self.undo_button = self._tool_button(_('Späť (Ctrl+Z)'), 'undo', self.undo, row)
+        self.redo_button = self._tool_button(_('Dopredu (Ctrl+Y)'), 'redo', self.redo, row)
         row.addStretch()
         toolbar_layout.addLayout(row, 0, 0)
         navigation = QHBoxLayout()
         navigation.setSpacing(3)
-        self.previous_button = self._tool_button('Predchádzajúca strana', 'previous', lambda: self.change_page(self.page_index - 1), navigation)
+        self.previous_button = self._tool_button(_('Predchádzajúca strana'), 'previous', lambda: self.change_page(self.page_index - 1), navigation)
         self.page_label = QLabel('0 / 0')
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         navigation.addWidget(self.page_label)
-        self.next_button = self._tool_button('Nasledujúca strana', 'next', lambda: self.change_page(self.page_index + 1), navigation)
+        self.next_button = self._tool_button(_('Nasledujúca strana'), 'next', lambda: self.change_page(self.page_index + 1), navigation)
         toolbar_layout.addLayout(navigation, 0, 1, Qt.AlignmentFlag.AlignCenter)
         bar = QHBoxLayout()
         bar.setSpacing(3)
-        self.pages_button = self._tool_button('Spravovať strany', 'pages', None, bar)
+        self.pages_button = self._tool_button(_('Spravovať strany'), 'pages', None, bar)
         self.pages_menu = QMenu(self)
-        self.duplicate_page_action = self.pages_menu.addAction('Duplikovať aktuálnu stranu', self.duplicate_page)
-        self.delete_page_action = self.pages_menu.addAction('Odstrániť aktuálnu stranu', self.delete_page)
+        self.duplicate_page_action = self.pages_menu.addAction(_('Duplikovať aktuálnu stranu'), self.duplicate_page)
+        self.delete_page_action = self.pages_menu.addAction(_('Odstrániť aktuálnu stranu'), self.delete_page)
         self.pages_menu.addSeparator()
-        self.insert_pdf_action = self.pages_menu.addAction('Vložiť PDF za aktuálnu stranu…', self.insert_pdf)
+        self.insert_pdf_action = self.pages_menu.addAction(_('Vložiť PDF za aktuálnu stranu…'), self.insert_pdf)
         self.pages_button.setMenu(self.pages_menu)
         self.pages_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._toolbar_separator(bar)
-        self.region_button = self._tool_button('Pridať textové pole', 'text', None, bar)
+        self.region_button = self._tool_button(_('Pridať textové pole'), 'text', None, bar)
         self.region_button.setCheckable(True)
         self.region_button.toggled.connect(self._region_toggled)
-        self.cover_button = self._tool_button('Vybrať oblasť', 'cover', None, bar)
+        self.cover_button = self._tool_button(_('Vybrať oblasť'), 'cover', None, bar)
         self.cover_button.setCheckable(True)
         self.cover_button.toggled.connect(self._cover_toggled)
         self._toolbar_separator(bar)
-        self.minus_button = self._tool_button('Oddialiť (Ctrl+-)', 'minus', lambda: self.view.zoom(0.8), bar)
+        self.minus_button = self._tool_button(_('Oddialiť (Ctrl+-)'), 'minus', lambda: self.view.zoom(0.8), bar)
         self.zoom_label = QLabel('100 %')
         self.zoom_label.setObjectName('zoomLevel')
         self.zoom_label.setMinimumWidth(42)
         self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.zoom_label.setToolTip('Zväčšenie dokumentu')
+        self.zoom_label.setToolTip(_('Zväčšenie dokumentu'))
         bar.addWidget(self.zoom_label)
-        self.plus_button = self._tool_button('Priblížiť (Ctrl++ alebo Ctrl+=)', 'plus', lambda: self.view.zoom(1.25), bar)
-        self.fit_button = self._tool_button('Na šírku (Ctrl+0)', 'fit', lambda: self.view.fit_width(), bar)
+        self.plus_button = self._tool_button(_('Priblížiť (Ctrl++ alebo Ctrl+=)'), 'plus', lambda: self.view.zoom(1.25), bar)
+        self.fit_button = self._tool_button(_('Na šírku (Ctrl+0)'), 'fit', lambda: self.view.fit_width(), bar)
         toolbar_layout.addLayout(bar, 0, 2, Qt.AlignmentFlag.AlignRight)
         side_width = max(row.minimumSize().width(), bar.minimumSize().width())
         toolbar_layout.setColumnMinimumWidth(0, side_width)
@@ -769,11 +771,11 @@ class Editor(QMainWindow):
         form = QVBoxLayout(panel)
         form.setContentsMargins(24, 26, 24, 24)
         form.setSpacing(14)
-        title = QLabel('Upraviť text')
+        title = QLabel(_('Upraviť text'))
         title.setObjectName('paneltitle')
         panel_header = QHBoxLayout()
         panel_header.addWidget(title, 1)
-        self.cancel_button = self._tool_button('Zrušiť výber (Escape)', 'close', self.cancel_selection, panel_header)
+        self.cancel_button = self._tool_button(_('Zrušiť výber (Escape)'), 'close', self.cancel_selection, panel_header)
         self.cancel_button.setFixedSize(32, 32)
         self.cancel_button.setIconSize(QSize(16, 16))
         form.addLayout(panel_header)
@@ -781,18 +783,18 @@ class Editor(QMainWindow):
         self.selection_preview.setFixedHeight(120)
         self.selection_preview.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.selection_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.selection_preview.setAccessibleName('Zväčšený náhľad vybraného textu')
+        self.selection_preview.setAccessibleName(_('Zväčšený náhľad vybraného textu'))
         self.selection_preview.hide()
         form.addWidget(self.selection_preview)
-        self.hint = QLabel('Otvorte PDF a kliknite na text, ktorý chcete zmeniť.')
+        self.hint = QLabel(_('Otvorte PDF a kliknite na text, ktorý chcete zmeniť.'))
         self.hint.setWordWrap(True)
         self.hint.setObjectName('muted')
         form.addWidget(self.hint)
-        label = QLabel('Nový text')
+        label = QLabel(_('Nový text'))
         form.addWidget(label)
         self.text = QTextEdit()
         self.text.setAcceptRichText(False)
-        self.text.setPlaceholderText('Vyberte text na strane…')
+        self.text.setPlaceholderText(_('Vyberte text na strane…'))
         self.text.setMinimumHeight(120)
         self.text.setMaximumHeight(220)
         label.setBuddy(self.text)
@@ -808,15 +810,15 @@ class Editor(QMainWindow):
         self.font_size = QComboBox()
         self.font_size.setObjectName('fontSize')
         self.font_size.setFixedSize(80, 28)
-        self.font_size.setToolTip('Maximálna veľkosť písma')
-        self.font_size.setAccessibleName('Veľkosť písma')
+        self.font_size.setToolTip(_('Maximálna veľkosť písma'))
+        self.font_size.setAccessibleName(_('Veľkosť písma'))
         for size in (4, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 60, 72, 96):
             self.font_size.addItem(f'{size} pt', size)
         self.font_size.setCurrentIndex(self.font_size.findData(11))
         self.font_size.currentIndexChanged.connect(self._edited)
         formatting.addWidget(self.font_size)
-        self.white_background = QCheckBox('Biely podklad')
-        self.white_background.setToolTip('Biely podklad pod nahradeným textom')
+        self.white_background = QCheckBox(_('Biely podklad'))
+        self.white_background.setToolTip(_('Biely podklad pod nahradeným textom'))
         self.white_background.setChecked(True)
         self.white_background.toggled.connect(self._edited)
         formatting.addWidget(self.white_background)
@@ -834,7 +836,7 @@ class Editor(QMainWindow):
         self.splitter.addWidget(panel_scroll)
         self.thumbnails = QListWidget()
         self.thumbnails.setObjectName('thumbnails')
-        self.thumbnails.setAccessibleName('Náhľady strán')
+        self.thumbnails.setAccessibleName(_('Náhľady strán'))
         self.thumbnails.setFixedWidth(160)
         self.thumbnails.setItemDelegate(ThumbnailDelegate(self.thumbnails))
         self.thumbnails.setSpacing(6)
@@ -876,15 +878,15 @@ class Editor(QMainWindow):
         self.drop_leave_timer.timeout.connect(lambda: self._set_drop_active(False))
         zone_layout = QVBoxLayout(drop_zone)
         zone_layout.setContentsMargins(36, 32, 36, 36)
-        headline = QLabel('Vaše PDF. Vaše úpravy.')
+        headline = QLabel(_('Vaše PDF. Vaše úpravy.'))
         headline.setAlignment(Qt.AlignmentFlag.AlignCenter)
         headline.setObjectName('headline')
         zone_layout.addWidget(headline)
-        subtitle = QLabel('Pretiahnite sem PDF, sken alebo fotografiu.\nAlebo vyberte súbor z počítača.')
+        subtitle = QLabel(_('Pretiahnite sem PDF, sken alebo fotografiu.\nAlebo vyberte súbor z počítača.'))
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setObjectName('subtitle')
         zone_layout.addWidget(subtitle)
-        empty_button = QPushButton('Vybrať súbor')
+        empty_button = QPushButton(_('Vybrať súbor'))
         empty_button.setObjectName('primary')
         empty_button.setFixedWidth(210)
         empty_button.clicked.connect(self.open_file)
@@ -895,7 +897,7 @@ class Editor(QMainWindow):
         self.splitter.hide()
         self.setCentralWidget(root)
         self.statusBar().addPermanentWidget(QLabel(f'v{VERSION}'))
-        self.statusBar().showMessage('Pripravené. Spracovanie prebieha lokálne bez nahrávania súborov.')
+        self.statusBar().showMessage(_('Pripravené. Spracovanie prebieha lokálne bez nahrávania súborov.'))
         for keys, callback in [
             ('Ctrl+O', self.open_file), ('Ctrl+S', self.save_button.click),
             ('Ctrl+Shift+S', self.save_button.click), ('Ctrl+Z', self.undo),
@@ -1024,8 +1026,8 @@ class Editor(QMainWindow):
         return button
 
     def _error(self, exc):
-        message = ERRORS.get(str(exc), str(exc))
-        QMessageBox.warning(self, 'Akciu sa nepodarilo dokončiť', message)
+        message = _(ERRORS.get(str(exc), str(exc)))
+        QMessageBox.warning(self, _('Akciu sa nepodarilo dokončiť'), message)
 
     def _busy(self):
         return self.ocr_worker is not None
@@ -1076,7 +1078,7 @@ class Editor(QMainWindow):
             return False
         if not self.pdf or not (self.pdf.dirty or self.pending):
             return True
-        answer = QMessageBox.question(self, 'Neuložené zmeny', 'Uložiť zmeny do novej PDF kópie?', QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Save)
+        answer = QMessageBox.question(self, _('Neuložené zmeny'), _('Uložiť zmeny do novej PDF kópie?'), QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Save)
         if answer == QMessageBox.StandardButton.Save:
             return self.save_copy()
         return answer == QMessageBox.StandardButton.Discard
@@ -1085,7 +1087,7 @@ class Editor(QMainWindow):
         if self._busy() or not self._leave_document():
             return
         if path is None:
-            path, _ = QFileDialog.getOpenFileName(self, 'Otvoriť súbor', '', 'Dokumenty (*.pdf *.jpg *.jpeg *.png)')
+            path, selected_filter = QFileDialog.getOpenFileName(self, _('Otvoriť súbor'), '', _('Dokumenty (*.pdf *.jpg *.jpeg *.png)'))
         if not path:
             return
         try:
@@ -1147,12 +1149,12 @@ class Editor(QMainWindow):
                 self.thumbnails.blockSignals(False)
             self._update_actions()
             if not areas:
-                self.statusBar().showMessage('Text tejto strany sa rozpozná automaticky. Môžete tiež pridať textové pole alebo zakryť oblasť.')
+                self.statusBar().showMessage(_('Text tejto strany sa rozpozná automaticky. Môžete tiež pridať textové pole alebo zakryť oblasť.'))
                 if self.page_index not in self.ocr_attempted and not self._busy():
                     self.ocr_attempted.add(self.page_index)
                     QTimer.singleShot(0, lambda document=self.pdf, index=self.page_index: self._auto_ocr(document, index))
             else:
-                self.statusBar().showMessage(f'Strana {self.page_index + 1} z {self.pdf.page_count}. Ťahaním označte text a stlačte Delete. Kliknutím upravíte celý úsek.')
+                self.statusBar().showMessage(_('Strana {page} z {count}. Ťahaním označte text a stlačte Delete. Kliknutím upravíte celý úsek.').format(page=self.page_index + 1, count=self.pdf.page_count))
         except Exception as exc:
             self._error(exc)
 
@@ -1228,11 +1230,11 @@ class Editor(QMainWindow):
         column.addStretch()
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
-        duplicate = self._tool_button('Duplikovať stranu', 'pages',
+        duplicate = self._tool_button(_('Duplikovať stranu'), 'pages',
             lambda: self._thumbnail_action(item, self.duplicate_page), row)
         duplicate.setObjectName('duplicatePage')
         row.addStretch()
-        delete = self._tool_button('Odstrániť stranu', 'close',
+        delete = self._tool_button(_('Odstrániť stranu'), 'close',
             lambda: self._thumbnail_action(item, self.delete_page), row)
         delete.setObjectName('deletePage')
         for button in (duplicate, delete):
@@ -1282,7 +1284,7 @@ class Editor(QMainWindow):
             self._error(exc)
             return
         self._pages_changed(self.page_index)
-        self.statusBar().showMessage('Strana bola odstránená. Obnovíte ju pomocou Ctrl+Z.')
+        self.statusBar().showMessage(_('Strana bola odstránená. Obnovíte ju pomocou Ctrl+Z.'))
 
     def duplicate_page(self):
         if not self.pdf or self._busy() or not self.pdf.page_count or not self._discard_pending():
@@ -1293,14 +1295,14 @@ class Editor(QMainWindow):
             self._error(exc)
             return
         self._pages_changed(self.page_index + 1)
-        self.statusBar().showMessage('Kópia strany bola vložená za pôvodnú stranu.')
+        self.statusBar().showMessage(_('Kópia strany bola vložená za pôvodnú stranu.'))
 
     def insert_pdf(self, checked=False, path=None, *, append=False):
         if not self.pdf or self._busy() or not self._discard_pending():
             return
         if path is None:
-            title = 'Pridať PDF na koniec dokumentu' if append else 'Vložiť PDF za aktuálnu stranu'
-            path, _ = QFileDialog.getOpenFileName(self, title, '', 'PDF (*.pdf)')
+            title = _('Pridať PDF na koniec dokumentu') if append else _('Vložiť PDF za aktuálnu stranu')
+            path, selected_filter = QFileDialog.getOpenFileName(self, title, '', 'PDF (*.pdf)')
         if not path:
             return
         try:
@@ -1310,7 +1312,7 @@ class Editor(QMainWindow):
             self._error(exc)
             return
         self._pages_changed(index + 1)
-        self.statusBar().showMessage('Strany z PDF boli vložené. Výsledok uložte ako kópiu.')
+        self.statusBar().showMessage(_('Strany z PDF boli vložené. Výsledok uložte ako kópiu.'))
 
     def refresh_preview(self):
         if not self.pdf or self._busy() or self.view.pixmap_item is None:
@@ -1333,7 +1335,7 @@ class Editor(QMainWindow):
     def _update_pagination(self):
         count = self.pdf.page_count if self.pdf else 0
         self.page_label.setText(f'{self.page_index + 1 if count else 0} / {count}')
-        self.page_label.setAccessibleName(f'Strana {self.page_index + 1 if count else 0} z {count}')
+        self.page_label.setAccessibleName(_('Strana {page} z {count}').format(page=self.page_index + 1 if count else 0, count=count))
         ready = bool(count) and not self._busy()
         self.previous_button.setEnabled(ready and self.page_index > 0)
         self.next_button.setEnabled(ready and self.page_index < count - 1)
@@ -1343,7 +1345,7 @@ class Editor(QMainWindow):
             self.cover_button.setChecked(False)
         self.view.set_region_mode(enabled)
         if self.pdf:
-            self.statusBar().showMessage('Ťahaním myši nakreslite nové textové pole.' if enabled else 'Kliknite na text na strane.')
+            self.statusBar().showMessage(_('Ťahaním myši nakreslite nové textové pole.') if enabled else _('Kliknite na text na strane.'))
 
     def _cover_toggled(self, enabled):
         if enabled:
@@ -1352,7 +1354,7 @@ class Editor(QMainWindow):
             self.clear_selection()
         self.view.set_region_mode(enabled or self.region_button.isChecked())
         if self.pdf and enabled:
-            self.statusBar().showMessage('Označte oblasť. Presuňte ju, zmeňte jej veľkosť alebo ju odstráňte klávesom Delete.')
+            self.statusBar().showMessage(_('Označte oblasť. Presuňte ju, zmeňte jej veľkosť alebo ju odstráňte klávesom Delete.'))
 
     def restore_highlight(self):
         if self.selection is None:
@@ -1415,7 +1417,7 @@ class Editor(QMainWindow):
         self.edit_error.hide()
         self.restore_highlight()
         self.update_selection_preview()
-        self.hint.setText('Text sa po dopísaní automaticky zmení v náhľade. Delete na strane vymaže výber. PDF uložíte tlačidlom Uložiť kópiu.')
+        self.hint.setText(_('Text sa po dopísaní automaticky zmení v náhľade. Delete na strane vymaže výber. PDF uložíte tlačidlom Uložiť kópiu.'))
         self._update_actions()
         self.view.setFocus()
 
@@ -1444,7 +1446,7 @@ class Editor(QMainWindow):
         self.text.blockSignals(False)
         self.restore_highlight()
         self.update_selection_preview()
-        self.hint.setText('Označený text vymažete klávesom Delete. Tlačidlom Späť vymazanie vrátite.')
+        self.hint.setText(_('Označený text vymažete klávesom Delete. Tlačidlom Späť vymazanie vrátite.'))
         self._update_actions()
         self.view.setFocus()
 
@@ -1462,14 +1464,14 @@ class Editor(QMainWindow):
             self.text.blockSignals(False)
             self.selection_preview.hide()
             self.edit_error.hide()
-            self.hint.setText('Oblasť presuňte, zmeňte jej veľkosť alebo ju odstráňte klávesom Delete.')
+            self.hint.setText(_('Oblasť presuňte, zmeňte jej veľkosť alebo ju odstráňte klávesom Delete.'))
             self.restore_highlight()
             self._update_actions()
             self.view.setFocus()
             return
         self.select_text({'text': '', 'bbox': bbox, 'size': min(11, max(4, pymupdf.Rect(bbox).height * 0.65)), 'color': 0, 'insert_only': True})
         if self.selection and self.selection['bbox'] == bbox:
-            self.hint.setText('Zadajte text do nového poľa. Náhľad sa aktualizuje automaticky.')
+            self.hint.setText(_('Zadajte text do nového poľa. Náhľad sa aktualizuje automaticky.'))
             self._update_actions()
             self.text.setFocus()
 
@@ -1493,7 +1495,7 @@ class Editor(QMainWindow):
         self.selection['baseline'] = baseline
         self.selection['bbox'] = bbox
         self.render_page()
-        self.statusBar().showMessage('Oblasť bola upravená. Zmenu môžete vrátiť tlačidlom Späť.')
+        self.statusBar().showMessage(_('Oblasť bola upravená. Zmenu môžete vrátiť tlačidlom Späť.'))
 
     def cancel_selection(self, checked=False):
         if self.pending:
@@ -1501,7 +1503,7 @@ class Editor(QMainWindow):
         self.region_button.setChecked(False)
         self.cover_button.setChecked(False)
         self.clear_selection()
-        self.statusBar().showMessage('Výber aj aktívny nástroj boli zrušené.')
+        self.statusBar().showMessage(_('Výber aj aktívny nástroj boli zrušené.'))
 
     def clear_selection(self, checked=False):
         self.auto_apply_timer.stop()
@@ -1522,7 +1524,7 @@ class Editor(QMainWindow):
         self.edit_error.hide()
         self.text.clear()
         self.view.highlight(None)
-        self.hint.setText('Kliknite na text na strane alebo pridajte textové pole ikonou T. Skeny sa rozpoznajú automaticky.')
+        self.hint.setText(_('Kliknite na text na strane alebo pridajte textové pole ikonou T. Skeny sa rozpoznajú automaticky.'))
         self._update_actions()
 
     def apply_change(self, automatic=False):
@@ -1533,7 +1535,7 @@ class Editor(QMainWindow):
         try:
             self.pdf.replace_text(index, self.selection['bbox'], self.text.toPlainText(), self.font_size.currentData(), self.selection.get('color', 0), self.white_background.isChecked(), update_previous=self.edit_applied, insert_only=self.selection.get('insert_only', False))
         except Exception as exc:
-            self.edit_error.setText(ERRORS.get(str(exc), str(exc)))
+            self.edit_error.setText(_(ERRORS.get(str(exc), str(exc))))
             self.edit_error.show()
             if not automatic:
                 self._error(exc)
@@ -1544,7 +1546,7 @@ class Editor(QMainWindow):
         self.edit_applied = True
         self.edit_error.hide()
         self.render_page()
-        self.statusBar().showMessage('Náhľad sa automaticky aktualizoval. PDF uložíte tlačidlom Uložiť kópiu.')
+        self.statusBar().showMessage(_('Náhľad sa automaticky aktualizoval. PDF uložíte tlačidlom Uložiť kópiu.'))
         return True
 
     def delete_selection(self):
@@ -1573,7 +1575,7 @@ class Editor(QMainWindow):
         self.ocr_areas[index] = [s for s in self.ocr_areas.get(index, []) if not rect.intersects(pymupdf.Rect(s['bbox']))]
         self.clear_selection()
         self.render_page()
-        self.statusBar().showMessage('Výber bol vymazaný. Vymazanie vrátite tlačidlom Späť alebo Ctrl+Z.')
+        self.statusBar().showMessage(_('Výber bol vymazaný. Vymazanie vrátite tlačidlom Späť alebo Ctrl+Z.'))
 
     def undo(self):
         if not self.pdf or self._busy():
@@ -1585,7 +1587,7 @@ class Editor(QMainWindow):
             return
         if self.pdf.undo():
             self._pages_changed(self.page_index, scroll=self.pdf.page_count != len(self.view.page_rects))
-            self.statusBar().showMessage('Posledná zmena bola vrátená späť.')
+            self.statusBar().showMessage(_('Posledná zmena bola vrátená späť.'))
 
     def redo(self):
         if not self.pdf or self._busy() or not self.pdf.can_redo:
@@ -1593,7 +1595,7 @@ class Editor(QMainWindow):
         self.auto_apply_timer.stop()
         if self.pdf.redo():
             self._pages_changed(self.page_index, scroll=self.pdf.page_count != len(self.view.page_rects))
-            self.statusBar().showMessage('Zmena bola znovu vykonaná.')
+            self.statusBar().showMessage(_('Zmena bola znovu vykonaná.'))
 
     def save_copy(self):
         if not self.pdf or self._busy():
@@ -1603,12 +1605,13 @@ class Editor(QMainWindow):
             return False
         if self.pending and not self.apply_change():
             return False
-        target = self.pdf.source.with_name(self.pdf.source.stem + '_upravene.pdf')
+        suffix = _('upravene')
+        target = self.pdf.source.with_name(self.pdf.source.stem + f'_{suffix}.pdf')
         number = 2
         while target.exists():
-            target = self.pdf.source.with_name(f'{self.pdf.source.stem}_upravene_{number}.pdf')
+            target = self.pdf.source.with_name(f'{self.pdf.source.stem}_{suffix}_{number}.pdf')
             number += 1
-        filename, _ = QFileDialog.getSaveFileName(self, 'Uložiť novú PDF kópiu', str(target), 'PDF (*.pdf)', options=QFileDialog.Option.DontConfirmOverwrite)
+        filename, selected_filter = QFileDialog.getSaveFileName(self, _('Uložiť novú PDF kópiu'), str(target), 'PDF (*.pdf)', options=QFileDialog.Option.DontConfirmOverwrite)
         if not filename:
             return False
         if not filename.lower().endswith('.pdf'):
@@ -1619,7 +1622,7 @@ class Editor(QMainWindow):
             self._error(exc)
             return False
         self._update_actions()
-        self.statusBar().showMessage(f'Uložené: {filename}')
+        self.statusBar().showMessage(_('Uložené: {filename}').format(filename=filename))
         return True
 
     def _auto_ocr(self, document, index):
@@ -1653,7 +1656,7 @@ class Editor(QMainWindow):
         self.ocr_worker.failed.connect(self._ocr_failed)
         self.ocr_worker.finished.connect(self._ocr_finished)
         self._update_actions()
-        self.statusBar().showMessage('Rozpoznávam text tejto strany pomocou Windows OCR…')
+        self.statusBar().showMessage(_('Rozpoznávam text tejto strany pomocou Windows OCR…'))
         self.ocr_worker.start()
 
     def _ocr_completed(self, lines):
@@ -1668,11 +1671,11 @@ class Editor(QMainWindow):
             areas.append({'text': line['text'], 'bbox': tuple(rect), 'size': max(4, (rect.height - 4) * 0.9), 'color': 0})
         self.ocr_areas[self.page_index] = areas
         self.render_page()
-        self.statusBar().showMessage(f'OCR dokončené: {len(areas)} oblastí zo skenu. Kliknite na text; rozpoznané údaje pred uložením skontrolujte.')
+        self.statusBar().showMessage(_('OCR dokončené: {count} oblastí zo skenu. Kliknite na text; rozpoznané údaje pred uložením skontrolujte.').format(count=len(areas)))
 
     def _ocr_failed(self, message):
-        self.hint.setText('Text sa nepodarilo automaticky rozpoznať. Môžete pridať textové pole alebo zakryť oblasť.')
-        self.statusBar().showMessage(f'Automatické rozpoznanie textu zlyhalo: {message}')
+        self.hint.setText(_('Text sa nepodarilo automaticky rozpoznať. Môžete pridať textové pole alebo zakryť oblasť.'))
+        self.statusBar().showMessage(_('Automatické rozpoznanie textu zlyhalo: {message}').format(message=message))
 
     def _ocr_finished(self):
         self.ocr_worker.deleteLater()
@@ -1682,12 +1685,8 @@ class Editor(QMainWindow):
         self._update_actions()
 
     def show_about(self):
-        QMessageBox.about(self, f'O aplikácii {APP_NAME}',
-            f'<b>{APP_NAME} {VERSION}</b><p>Editor PDF pre Windows.</p>'
-            '<p>Copyright © 2026 hudakjakub a prispievatelia.<br>'
-            'GNU AGPL v3. Bez záruky. Program môžete upravovať a ďalej šíriť podľa licencie.</p>'
-            f'<p><a href="{PROJECT_URL}/tree/v{VERSION}">Zdrojový kód</a> · '
-            f'<a href="{PROJECT_URL}/blob/v{VERSION}/LICENSE">Licencia</a></p>')
+        QMessageBox.about(self, _('O aplikácii {name}').format(name=APP_NAME),
+            _('<b>{name} {version}</b><p>Editor PDF pre Windows.</p><p>Copyright © 2026 hudakjakub a prispievatelia.<br>GNU AGPL v3. Bez záruky. Program môžete upravovať a ďalej šíriť podľa licencie.</p><p><a href="{url}/tree/v{version}">Zdrojový kód</a> · <a href="{url}/blob/v{version}/LICENSE">Licencia</a></p>').format(name=APP_NAME, version=VERSION, url=PROJECT_URL))
 
     def _automatic_updates_toggled(self, enabled):
         self.settings.setValue('updates/automatic', enabled)
@@ -1708,14 +1707,14 @@ class Editor(QMainWindow):
             return
         self._update_manual = not automatic
         self.check_updates_action.setEnabled(False)
-        self.check_updates_action.setText('Kontrolujú sa aktualizácie…')
+        self.check_updates_action.setText(_('Kontrolujú sa aktualizácie…'))
         self._start_update_worker()
 
     def _start_update_worker(self, verification=None):
         self.update_worker = UpdateWorker(self, verification)
         self.update_worker.completed.connect(self._update_completed)
         self.update_worker.failed.connect(self._update_failed)
-        self.update_worker.downloading.connect(lambda: self.check_updates_action.setText('Sťahuje sa aktualizácia…'))
+        self.update_worker.downloading.connect(lambda: self.check_updates_action.setText(_('Sťahuje sa aktualizácia…')))
         self.update_worker.finished.connect(self._update_finished)
         self.update_worker.start()
 
@@ -1728,24 +1727,23 @@ class Editor(QMainWindow):
         release, installer = result
         if release is None:
             if self._update_manual:
-                QMessageBox.information(self, 'Aktualizácie', f'{APP_NAME} {VERSION} je aktuálna verzia.')
+                QMessageBox.information(self, _('Aktualizácie'), _('{name} {version} je aktuálna verzia.').format(name=APP_NAME, version=VERSION))
             return
         if installer is None:
-            answer = QMessageBox.question(self, 'Nová verzia',
-                f'Je dostupná verzia {release.version}. Otvoriť stránku vydania?',
+            answer = QMessageBox.question(self, _('Nová verzia'),
+                _('Je dostupná verzia {version}. Otvoriť stránku vydania?').format(version=release.version),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if answer == QMessageBox.StandardButton.Yes:
                 QDesktopServices.openUrl(QUrl(f'{PROJECT_URL}/releases/tag/v{release.version}'))
             return
         self.ready_update = (release, installer)
-        self.statusBar().showMessage(f'Aktualizácia {release.version} je pripravená na inštaláciu.')
+        self.statusBar().showMessage(_('Aktualizácia {version} je pripravená na inštaláciu.').format(version=release.version))
 
     def _update_failed(self, message):
         if self._install_pending:
             self.ready_update = None
         if not self._closing_after_update and (self._update_manual or self._install_pending):
-            QMessageBox.warning(self, 'Aktualizácie', 'Aktualizáciu sa nepodarilo overiť alebo stiahnuť. '
-                                'Skontrolujte pripojenie a skúste to znova.')
+            QMessageBox.warning(self, _('Aktualizácie'), _('Aktualizáciu sa nepodarilo overiť alebo stiahnuť. Skontrolujte pripojenie a skúste to znova.'))
 
     def _update_finished(self):
         worker = self.update_worker
@@ -1755,7 +1753,7 @@ class Editor(QMainWindow):
         self._skip_update_offer = False
         self.centralWidget().setEnabled(True)
         self.check_updates_action.setEnabled(True)
-        self.check_updates_action.setText('Nainštalovať aktualizáciu…' if self.ready_update else 'Skontrolovať aktualizácie…')
+        self.check_updates_action.setText(_('Nainštalovať aktualizáciu…') if self.ready_update else _('Skontrolovať aktualizácie…'))
         if self._closing_after_update:
             self.close()
         elif self._install_pending:
@@ -1775,12 +1773,10 @@ class Editor(QMainWindow):
         local = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local')))
         installed = (executable_dir / 'unins000.exe').is_file()
         self._install_directory = executable_dir if installed else local / 'Programs' / 'OmniPDF'
-        message = (f'Nainštalovať Omni PDF {release.version} a reštartovať aplikáciu? '
-                   'Pred reštartom budete môcť uložiť rozpracované PDF.')
+        message = _('Nainštalovať Omni PDF {version} a reštartovať aplikáciu? Pred reštartom budete môcť uložiť rozpracované PDF.').format(version=release.version)
         if not installed:
-            message += (f'\n\nPrenosná aplikácia sa nainštaluje do:\n{self._install_directory}\n'
-                        'Existujúca inštalácia v tomto priečinku sa aktualizuje. Pôvodný prenosný EXE zostane zachovaný.')
-        answer = QMessageBox.question(self, 'Aktualizácia je pripravená',
+            message += _('\n\nPrenosná aplikácia sa nainštaluje do:\n{directory}\nExistujúca inštalácia v tomto priečinku sa aktualizuje. Pôvodný prenosný EXE zostane zachovaný.').format(directory=self._install_directory)
+        answer = QMessageBox.question(self, _('Aktualizácia je pripravená'),
             message,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if answer != QMessageBox.StandardButton.Yes or self._busy() or not self._leave_document():
@@ -1788,7 +1784,7 @@ class Editor(QMainWindow):
             return
         self.centralWidget().setEnabled(False)
         self.check_updates_action.setEnabled(False)
-        self.check_updates_action.setText('Overuje sa inštalátor…')
+        self.check_updates_action.setText(_('Overuje sa inštalátor…'))
         self._start_update_worker(verification=self.ready_update)
 
     def _launch_update(self):
@@ -1799,8 +1795,8 @@ class Editor(QMainWindow):
             updates.launch_installer(installer, self._install_directory, os.getpid())
         except updates.UpdateError:
             self.ready_update = None
-            self.check_updates_action.setText('Skontrolovať aktualizácie…')
-            QMessageBox.warning(self, 'Aktualizácia', 'Inštalátor sa nepodarilo bezpečne spustiť. Skúste aktualizáciu znova.')
+            self.check_updates_action.setText(_('Skontrolovať aktualizácie…'))
+            QMessageBox.warning(self, _('Aktualizácia'), _('Inštalátor sa nepodarilo bezpečne spustiť. Skúste aktualizáciu znova.'))
             return
         self._close_approved = True
         if not self.close():
@@ -1813,7 +1809,7 @@ class Editor(QMainWindow):
             self._verified_update = None
             self._skip_update_offer = True
         if self._busy():
-            QMessageBox.information(self, 'Rozpoznávanie textu', 'Počkajte na dokončenie rozpoznávania textu.')
+            QMessageBox.information(self, _('Rozpoznávanie textu'), _('Počkajte na dokončenie rozpoznávania textu.'))
             event.ignore()
         elif self._close_approved or self._leave_document():
             self.auto_apply_timer.stop()
@@ -1974,6 +1970,7 @@ def main():
     arguments = parser.parse_args()
     set_app_id()
     application = QApplication(sys.argv)
+    configure_language(application)
     application.setApplicationName(APP_NAME)
     application.setApplicationDisplayName(APP_NAME)
     application.setApplicationVersion(VERSION)

@@ -31,6 +31,8 @@ Inštalácia závislostí vyžaduje prístup k balíkom Pythonu. Potom aplikáci
 
 ## Použitie
 
+Aplikácia sa zobrazí po slovensky pri slovenskom systémovom jazyku; pri ostatných jazykoch použije angličtinu. Jazyk sa určí pri spustení aplikácie.
+
 Kompaktný klasický panel spája všetko do jedného riadka: názov dokumentu a súborové akcie vľavo, prepínanie strán uprostred, textové nástroje a zväčšenie vpravo. Názvy ikon sa zobrazia po podržaní myši.
 
 1. Otvorte PDF, JPG alebo PNG tlačidlom alebo pretiahnutím jedného súboru do prerušovaného rámu či kamkoľvek do okna. Pri otvorení ďalšieho dokumentu sa aplikácia opýta na uloženie rozpracovaných zmien.

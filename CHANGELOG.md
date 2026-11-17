@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5
+
+- Display the application in Slovak or English based on the system UI language.
+
 ## 0.1.4
 
 - Add standard keyboard shortcuts for saving and document zoom.

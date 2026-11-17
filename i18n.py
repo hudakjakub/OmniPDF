@@ -1,0 +1,157 @@
+"""Application strings and Qt translations for the system UI language."""
+from pathlib import Path
+
+from PySide6.QtCore import QLibraryInfo, QLocale, QTranslator
+
+
+EN = {
+    'Strana PDF. Ťahaním označte text, klávesom Delete ho vymažte.': 'PDF page. Drag to select text and press Delete to remove it.',
+    'Pridať PDF na koniec — kliknite alebo sem pretiahnite PDF': 'Append PDF — click or drop a PDF here',
+    'Pridať PDF na koniec dokumentu': 'Append PDF to document',
+    'Ponuka aplikácie Omni PDF': 'Omni PDF application menu',
+    'O aplikácii…': 'About…',
+    'Skontrolovať aktualizácie…': 'Check for updates…',
+    'Automatické aktualizácie': 'Automatic updates',
+    'PDF, JPG alebo PNG': 'PDF, JPG or PNG',
+    'Otvoriť súbor (Ctrl+O)': 'Open file (Ctrl+O)',
+    'Uložiť kópiu (Ctrl+S alebo Ctrl+Shift+S)': 'Save a copy (Ctrl+S or Ctrl+Shift+S)',
+    'Späť (Ctrl+Z)': 'Undo (Ctrl+Z)',
+    'Dopredu (Ctrl+Y)': 'Redo (Ctrl+Y)',
+    'Predchádzajúca strana': 'Previous page',
+    'Nasledujúca strana': 'Next page',
+    'Spravovať strany': 'Manage pages',
+    'Duplikovať aktuálnu stranu': 'Duplicate current page',
+    'Odstrániť aktuálnu stranu': 'Delete current page',
+    'Vložiť PDF za aktuálnu stranu…': 'Insert PDF after current page…',
+    'Pridať textové pole': 'Add text box',
+    'Vybrať oblasť': 'Select area',
+    'Oddialiť (Ctrl+-)': 'Zoom out (Ctrl+-)',
+    'Zväčšenie dokumentu': 'Document zoom',
+    'Priblížiť (Ctrl++ alebo Ctrl+=)': 'Zoom in (Ctrl++ or Ctrl+=)',
+    'Na šírku (Ctrl+0)': 'Fit width (Ctrl+0)',
+    'Upraviť text': 'Edit text',
+    'Zrušiť výber (Escape)': 'Cancel selection (Escape)',
+    'Zväčšený náhľad vybraného textu': 'Magnified preview of selected text',
+    'Otvorte PDF a kliknite na text, ktorý chcete zmeniť.': 'Open a PDF and click the text you want to edit.',
+    'Nový text': 'New text',
+    'Vyberte text na strane…': 'Select text on the page…',
+    'Maximálna veľkosť písma': 'Maximum font size',
+    'Veľkosť písma': 'Font size',
+    'Biely podklad': 'White background',
+    'Biely podklad pod nahradeným textom': 'White background behind replacement text',
+    'Náhľady strán': 'Page thumbnails',
+    'Vaše PDF. Vaše úpravy.': 'Your PDF. Your edits.',
+    'Pretiahnite sem PDF, sken alebo fotografiu.\nAlebo vyberte súbor z počítača.': 'Drop a PDF, scan or photo here.\nOr select a file from your computer.',
+    'Vybrať súbor': 'Select file',
+    'Pripravené. Spracovanie prebieha lokálne bez nahrávania súborov.': 'Ready. Files are processed locally and are not uploaded.',
+    'Akciu sa nepodarilo dokončiť': 'Could not complete the action',
+    'Neuložené zmeny': 'Unsaved changes',
+    'Uložiť zmeny do novej PDF kópie?': 'Save changes to a new PDF copy?',
+    'Otvoriť súbor': 'Open file',
+    'Dokumenty (*.pdf *.jpg *.jpeg *.png)': 'Documents (*.pdf *.jpg *.jpeg *.png)',
+    'Duplikovať stranu': 'Duplicate page',
+    'Odstrániť stranu': 'Delete page',
+    'Strana bola odstránená. Obnovíte ju pomocou Ctrl+Z.': 'Page deleted. Press Ctrl+Z to restore it.',
+    'Kópia strany bola vložená za pôvodnú stranu.': 'A copy was inserted after the original page.',
+    'Vložiť PDF za aktuálnu stranu': 'Insert PDF after current page',
+    'Strany z PDF boli vložené. Výsledok uložte ako kópiu.': 'PDF pages inserted. Save the result as a copy.',
+    'Ťahaním myši nakreslite nové textové pole.': 'Drag to draw a new text box.',
+    'Kliknite na text na strane.': 'Click text on the page.',
+    'Označte oblasť. Presuňte ju, zmeňte jej veľkosť alebo ju odstráňte klávesom Delete.': 'Select an area. Move or resize it, or press Delete to remove it.',
+    'Text sa po dopísaní automaticky zmení v náhľade. Delete na strane vymaže výber. PDF uložíte tlačidlom Uložiť kópiu.': 'The preview updates automatically after typing. Press Delete on the page to remove the selection. Use Save a copy to save the PDF.',
+    'Označený text vymažete klávesom Delete. Tlačidlom Späť vymazanie vrátite.': 'Press Delete to remove selected text. Use Undo to restore it.',
+    'Oblasť presuňte, zmeňte jej veľkosť alebo ju odstráňte klávesom Delete.': 'Move or resize the area, or press Delete to remove it.',
+    'Zadajte text do nového poľa. Náhľad sa aktualizuje automaticky.': 'Enter text in the new box. The preview updates automatically.',
+    'Oblasť bola upravená. Zmenu môžete vrátiť tlačidlom Späť.': 'Area edited. Use Undo to revert the change.',
+    'Výber aj aktívny nástroj boli zrušené.': 'Selection and active tool cleared.',
+    'Kliknite na text na strane alebo pridajte textové pole ikonou T. Skeny sa rozpoznajú automaticky.': 'Click text on the page or add a text box using the T icon. Scans are recognized automatically.',
+    'Náhľad sa automaticky aktualizoval. PDF uložíte tlačidlom Uložiť kópiu.': 'Preview updated. Use Save a copy to save the PDF.',
+    'Výber bol vymazaný. Vymazanie vrátite tlačidlom Späť alebo Ctrl+Z.': 'Selection deleted. Use Undo or Ctrl+Z to restore it.',
+    'Posledná zmena bola vrátená späť.': 'Last change undone.',
+    'Zmena bola znovu vykonaná.': 'Change redone.',
+    'Uložiť novú PDF kópiu': 'Save a new PDF copy',
+    'upravene': 'edited',
+    'Rozpoznávam text tejto strany pomocou Windows OCR…': 'Recognizing text on this page using Windows OCR…',
+    'Text sa nepodarilo automaticky rozpoznať. Môžete pridať textové pole alebo zakryť oblasť.': 'Text could not be recognized automatically. You can add a text box or select an area.',
+    'Kontrolujú sa aktualizácie…': 'Checking for updates…',
+    'Sťahuje sa aktualizácia…': 'Downloading update…',
+    'Aktualizácie': 'Updates',
+    'Nová verzia': 'New version',
+    'Aktualizáciu sa nepodarilo overiť alebo stiahnuť. Skontrolujte pripojenie a skúste to znova.': 'The update could not be verified or downloaded. Check your connection and try again.',
+    'Nainštalovať aktualizáciu…': 'Install update…',
+    'Aktualizácia je pripravená': 'Update ready',
+    'Overuje sa inštalátor…': 'Verifying installer…',
+    'Aktualizácia': 'Update',
+    'Inštalátor sa nepodarilo bezpečne spustiť. Skúste aktualizáciu znova.': 'The installer could not be started safely. Try the update again.',
+    'Rozpoznávanie textu': 'Text recognition',
+    'Počkajte na dokončenie rozpoznávania textu.': 'Wait for text recognition to finish.',
+    'Text tejto strany sa rozpozná automaticky. Môžete tiež pridať textové pole alebo zakryť oblasť.': 'Text on this page will be recognized automatically. You can also add a text box or select an area.',
+    'PDF je chránené heslom. Otvorte odomknutú kópiu.': 'The PDF is password protected. Open an unlocked copy.',
+    'PDF je poškodené. Skúste ho znova exportovať.': 'The PDF is damaged. Try exporting it again.',
+    'Toto PDF má zakázané úpravy.': 'This PDF does not permit editing.',
+    'Digitálne podpísané PDF nie je možné upraviť bez zneplatnenia podpisu.': 'A digitally signed PDF cannot be edited without invalidating its signature.',
+    'Toto PDF obsahuje digitálny podpis.': 'This PDF contains a digital signature.',
+    'Vyberte PDF alebo obrázok vo formáte JPG či PNG.': 'Choose a PDF, JPG or PNG file.',
+    'Dokument nemá žiadnu stranu.': 'The document has no pages.',
+    'Vyberte platnú stranu.': 'Select a valid page.',
+    'Na vloženie ďalších strán vyberte PDF súbor.': 'Choose a PDF file to insert pages.',
+    'Označte oblasť vnútri strany.': 'Select an area inside the page.',
+    'Zadajte platný text a veľkosť písma.': 'Enter valid text and font size.',
+    'Okraj oblasti zasahuje do susedného textu. Označte celý text alebo zmenšite oblasť.': 'The area overlaps neighboring text. Select the entire text or reduce the area.',
+    'Text sa nezmestí do oblasti. Zmenšite písmo alebo označte väčšiu oblasť.': 'The text does not fit. Reduce the font size or select a larger area.',
+    'Originál sa neprepisuje. Vyberte nový názov PDF.': 'The original cannot be overwritten. Choose a new PDF name.',
+    'Tento súbor už existuje. Vyberte nový názov PDF.': 'This file already exists. Choose a new PDF name.',
+    'Uložené PDF sa nepodarilo overiť.': 'The saved PDF could not be verified.',
+    'Výber už nie je aktuálny. Označte text znova.': 'The selection is no longer current. Select the text again.',
+    'Najprv označte text, ktorý chcete vymazať.': 'Select the text you want to delete first.',
+    'Predchádzajúcu úpravu už nemožno aktualizovať.': 'The previous edit can no longer be updated.',
+    'Strana obsahuje existujúce redakcie. Pred úpravou ich odstráňte alebo použite inú kópiu.': 'This page contains existing redactions. Remove them before editing or use another copy.',
+    'Text je nad obrázkom. Zakryte ho ikonou obdĺžnika a pridajte nový text ikonou T.': 'Text is over an image. Select and delete the area, then add text using the T icon.',
+    'Nie je nainštalovaný žiadny jazyk pre Windows OCR. Nainštalujte jazykový balík s rozpoznávaním textu v nastaveniach Windows.': 'No Windows OCR language is installed. Install a language pack with text recognition in Windows settings.',
+    'Windows OCR vrátilo neplatný výsledok.': 'Windows OCR returned an invalid result.',
+    'Strana {page} z {count}': 'Page {page} of {count}',
+    'Strana {page} z {count}. Ťahaním označte text a stlačte Delete. Kliknutím upravíte celý úsek.': 'Page {page} of {count}. Drag to select text and press Delete. Click to edit an entire text span.',
+    'Uložené: {filename}': 'Saved: {filename}',
+    'OCR dokončené: {count} oblastí zo skenu. Kliknite na text; rozpoznané údaje pred uložením skontrolujte.': 'OCR complete: {count} areas found. Click text and check recognized content before saving.',
+    'Automatické rozpoznanie textu zlyhalo: {message}': 'Automatic text recognition failed: {message}',
+    'Nepodarilo sa spustiť Windows OCR: {error}': 'Could not start Windows OCR: {error}',
+    'Windows OCR zlyhalo: {error}': 'Windows OCR failed: {error}',
+    'O aplikácii {name}': 'About {name}',
+    '{name} · Editor PDF\nSúbory zostávajú v počítači': '{name} · PDF editor\nFiles stay on your computer',
+    '<b>{name} {version}</b><p>Editor PDF pre Windows.</p><p>Copyright © 2026 hudakjakub a prispievatelia.<br>GNU AGPL v3. Bez záruky. Program môžete upravovať a ďalej šíriť podľa licencie.</p><p><a href="{url}/tree/v{version}">Zdrojový kód</a> · <a href="{url}/blob/v{version}/LICENSE">Licencia</a></p>': '<b>{name} {version}</b><p>PDF editor for Windows.</p><p>Copyright © 2026 hudakjakub and contributors.<br>GNU AGPL v3. No warranty. You may modify and redistribute this program under the license.</p><p><a href="{url}/tree/v{version}">Source code</a> · <a href="{url}/blob/v{version}/LICENSE">License</a></p>',
+    '{name} {version} je aktuálna verzia.': '{name} {version} is up to date.',
+    'Je dostupná verzia {version}. Otvoriť stránku vydania?': 'Version {version} is available. Open the release page?',
+    'Aktualizácia {version} je pripravená na inštaláciu.': 'Update {version} is ready to install.',
+    'Nainštalovať Omni PDF {version} a reštartovať aplikáciu? Pred reštartom budete môcť uložiť rozpracované PDF.': 'Install Omni PDF {version} and restart the application? You can save your work before restarting.',
+    '\n\nPrenosná aplikácia sa nainštaluje do:\n{directory}\nExistujúca inštalácia v tomto priečinku sa aktualizuje. Pôvodný prenosný EXE zostane zachovaný.': '\n\nThe portable application will be installed to:\n{directory}\nAn existing installation in this folder will be updated. The original portable EXE will be kept.',
+}
+
+
+def language():
+    languages = QLocale.system().uiLanguages()
+    return 'sk' if languages and languages[0].split('-')[0].lower() == 'sk' else 'en'
+
+
+def _(text):
+    return EN.get(text, text) if language() == 'en' else text
+
+
+class QtTranslator(QTranslator):
+    def translate(self, context, source_text, disambiguation=None, n=-1):
+        if context == 'QPlatformTheme':
+            context = 'QDialogButtonBox'
+        return super().translate(context, source_text, disambiguation, n) or None
+
+
+def configure_language(application):
+    previous = getattr(application, '_qt_translator', None)
+    if previous is not None:
+        application.removeTranslator(previous)
+        application._qt_translator = None
+    if language() == 'sk':
+        translator = QtTranslator(application)
+        bundled = Path(__file__).resolve().parent / 'translations'
+        system = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+        if translator.load('qtbase_sk', str(bundled)) or translator.load('qtbase_sk', system):
+            application.installTranslator(translator)
+            application._qt_translator = translator

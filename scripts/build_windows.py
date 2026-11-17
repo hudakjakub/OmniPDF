@@ -47,6 +47,7 @@ def main():
     if sys.platform != 'win32':
         raise SystemExit('Windows is required for the build')
     from PySide6.QtGui import QIcon
+    from PySide6.QtCore import QLibraryInfo
     from PySide6.QtWidgets import QApplication
 
     os.chdir(ROOT)
@@ -88,6 +89,7 @@ def main():
                     '--name', 'OmniPDF', '--specpath', str(build), '--icon', str(build / 'omni.ico'), '--version-file', str(build / 'version.txt'),
                     *sum((['--add-data', f'{ROOT / name};{dest}'] for name, dest in
                           [('assets', 'assets'), ('windows_ocr.ps1', '.'), ('LICENSE', '.'), ('THIRD_PARTY_NOTICES.md', '.'),
+                           (str(Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)) / 'qtbase_sk.qm'), 'translations'),
                            (str(licenses), 'licenses')]), []),
                     'main.py'], check=True, env=build_environment())
     portable = release / f'OmniPDF-{VERSION}-windows-x64.exe'
