@@ -70,5 +70,5 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           $assets = @(Get-ChildItem release -File | ForEach-Object { $_.FullName })
-          gh release create $env:TAG @assets --verify-tag --title $env:TAG --generate-notes
+          gh release create $env:TAG @assets --verify-tag --title "Omni PDF" --generate-notes
           if ($LASTEXITCODE -ne 0) { throw 'Release creation failed; existing releases and assets are never overwritten.' }

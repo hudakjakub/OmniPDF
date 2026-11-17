@@ -8,9 +8,11 @@ Aplikácia používa pevnú svetlú tému vrátane ponúk, výberov, upozornení
 
 Hotové súbory pre Windows x64 sú v [GitHub Releases](https://github.com/hudakjakub/OmniPDF/releases/latest):
 
-- **OmniPDF-Setup-VERSION-windows-x64.exe** — odporúčaný inštalátor pre aktuálneho používateľa bez administrátorských práv.
-- **OmniPDF-VERSION-windows-x64.exe** — prenosná aplikácia, ktorú možno priamo spustiť.
-- **SHA256SUMS.txt** — kontrolné súčty oboch EXE súborov.
+- **OmniPDF-Setup-windows-x64.exe** — odporúčaný inštalátor pre aktuálneho používateľa bez administrátorských práv.
+- **OmniPDF-windows-x64.exe** — prenosná aplikácia, ktorú možno priamo spustiť.
+- **SHA256SUMS.txt** — kontrolné súčty EXE súborov.
+
+Vydanie obsahuje aj inštalátor s verziou v názve kvôli aktualizácii starších inštalácií.
 
 Python netreba inštalovať. Buildy zatiaľ nemajú podpis Authenticode; Windows môže zobraziť upozornenie SmartScreen.
 

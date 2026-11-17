@@ -20,8 +20,8 @@ function Test-SmokeResult([string]$Path) {
     }
 }
 
-$portable = Get-ChildItem release/OmniPDF-*-windows-x64.exe | Where-Object { $_.Name -notlike '*Setup*' } | Select-Object -First 1
-$setup = Get-ChildItem release/OmniPDF-Setup-*-windows-x64.exe | Select-Object -First 1
+$portable = Get-Item release/OmniPDF-windows-x64.exe
+$setup = Get-Item release/OmniPDF-Setup-windows-x64.exe
 $target = Join-Path $env:RUNNER_TEMP 'OmniPDF-test'
 Get-Content release/SHA256SUMS.txt | ForEach-Object {
     $hash, $name = $_ -split '\s+', 2

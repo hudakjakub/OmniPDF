@@ -11,6 +11,7 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from app_info import VERSION
+from updates import INSTALLER_NAME
 
 
 def validate_version(version, tag=None):
@@ -92,13 +93,16 @@ def main():
                            (str(Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)) / 'qtbase_sk.qm'), 'translations'),
                            (str(licenses), 'licenses')]), []),
                     'main.py'], check=True, env=build_environment())
-    portable = release / f'OmniPDF-{VERSION}-windows-x64.exe'
+    portable = release / 'OmniPDF-windows-x64.exe'
     shutil.copy2(ROOT / 'dist' / 'OmniPDF.exe', portable)
     subprocess.run([str(iscc), f'/DAppVersion={VERSION}', str(ROOT / 'packaging' / 'installer.iss')], check=True)
-    installer = release / f'OmniPDF-Setup-{VERSION}-windows-x64.exe'
+    installer = release / INSTALLER_NAME
+    # Older installed updaters require the versioned installer name.
+    legacy_installer = release / f'OmniPDF-Setup-{VERSION}-windows-x64.exe'
+    shutil.copy2(installer, legacy_installer)
     (release / 'SHA256SUMS.txt').write_text(''.join(
         f'{hashlib.file_digest(path.open("rb"), "sha256").hexdigest()}  {path.name}\n'
-        for path in (portable, installer)), encoding='ascii')
+        for path in (portable, installer, legacy_installer)), encoding='ascii')
 
 
 if __name__ == '__main__':

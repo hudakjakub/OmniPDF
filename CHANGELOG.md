@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.8
+
+- Publish stable download names while retaining a compatible installer for older updaters.
+
 ## 0.1.7
 
 - Create a ready-to-type text box with a single click.

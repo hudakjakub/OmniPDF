@@ -24,6 +24,7 @@ TIMEOUT = 30
 _HOSTS = {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}
 _VERSION = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 _HASH = re.compile(r"[0-9a-fA-F]{64}\Z")
+INSTALLER_NAME = 'OmniPDF-Setup-windows-x64.exe'
 
 
 class UpdateError(Exception):
@@ -56,6 +57,15 @@ def _asset_url(url, tag, name):
 def _trusted_url(url):
     parsed = urlsplit(url)
     return parsed.scheme == "https" and parsed.netloc in _HOSTS and not parsed.fragment
+
+
+def _installer_filename(release):
+    url = release.asset_url if isinstance(release.asset_url, str) else ''
+    filename = urlsplit(url).path.rsplit('/', 1)[-1]
+    if filename not in (INSTALLER_NAME, f'OmniPDF-Setup-{release.version}-windows-x64.exe'):
+        raise UpdateError('Invalid release download URL.')
+    _asset_url(url, 'v' + release.version, filename)
+    return filename
 
 
 class _Redirects(HTTPRedirectHandler):
@@ -101,7 +111,6 @@ def check_for_update(current_version=VERSION):
     if _version(tag) <= current:
         return None
     version = tag[1:]
-    filename = f"OmniPDF-Setup-{version}-windows-x64.exe"
     assets = data.get("assets")
     if not isinstance(assets, list):
         raise UpdateError("Release assets are missing.")
@@ -110,6 +119,8 @@ def check_for_update(current_version=VERSION):
         if len(matches) != 1:
             raise UpdateError("Release assets are missing or duplicated.")
         return matches[0]
+    filename = (INSTALLER_NAME if any(isinstance(item, dict) and item.get('name') == INSTALLER_NAME for item in assets)
+                else f'OmniPDF-Setup-{version}-windows-x64.exe')
     installer = asset(filename)
     url = _asset_url(installer.get("browser_download_url"), tag, filename)
     size = installer.get("size")
@@ -142,8 +153,7 @@ def check_for_update(current_version=VERSION):
 def download_update(release, destination_dir, *, cancelled=None):
     tag = "v" + release.version
     _version(tag)
-    filename = f"OmniPDF-Setup-{release.version}-windows-x64.exe"
-    _asset_url(release.asset_url, tag, filename)
+    filename = _installer_filename(release)
     if not isinstance(release.checksum, str) or not _HASH.fullmatch(release.checksum) or type(release.size) is not int or not 0 < release.size <= MAX_INSTALLER:
         raise UpdateError("Invalid release metadata.")
     if cancelled and cancelled():
@@ -186,8 +196,7 @@ def download_update(release, destination_dir, *, cancelled=None):
 def verify_installer(path, release):
     tag = "v" + release.version
     _version(tag)
-    filename = f"OmniPDF-Setup-{release.version}-windows-x64.exe"
-    _asset_url(release.asset_url, tag, filename)
+    filename = _installer_filename(release)
     if (Path(path).name != filename or type(release.size) is not int
             or not 0 < release.size <= MAX_INSTALLER
             or not isinstance(release.checksum, str) or not _HASH.fullmatch(release.checksum)):

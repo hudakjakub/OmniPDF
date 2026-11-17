@@ -29,6 +29,43 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.check(self.metadata()).version, "0.10.0")
         self.assertIsNone(self.check(self.metadata(), "0.11.0"))
 
+    def test_unversioned_installer_and_legacy_compatibility(self):
+        filename = 'OmniPDF-Setup-windows-x64.exe'
+        url = self.url.rsplit('/', 1)[0] + '/' + filename
+        data = self.metadata()
+        data['assets'].append({'name': filename, 'browser_download_url': url,
+                               'size': len(self.content), 'digest': 'sha256:' + self.digest})
+        release = self.check(data)
+        self.assertEqual(release.asset_url, url)
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(updates, '_open', return_value=io.BytesIO(self.content)):
+                path = updates.download_update(release, folder)
+            self.assertEqual(path.name, filename)
+            updates.verify_installer(path, release)
+            path.write_bytes(b'tampered')
+            with self.assertRaises(updates.UpdateError):
+                updates.verify_installer(path, release)
+        self.assertEqual(self.check(self.metadata()).asset_url, self.url)
+        data['assets'].append(data['assets'][-1])
+        with self.assertRaises(updates.UpdateError):
+            self.check(data)
+
+    def test_unversioned_installer_checksum_file_and_url_validation(self):
+        filename = 'OmniPDF-Setup-windows-x64.exe'
+        url = self.url.rsplit('/', 1)[0] + '/' + filename
+        data = self.metadata()
+        data['assets'] = [
+            {'name': filename, 'browser_download_url': url, 'size': len(self.content)},
+            {'name': 'SHA256SUMS.txt', 'browser_download_url': self.url.rsplit('/', 1)[0] + '/SHA256SUMS.txt'},
+        ]
+        with patch.object(updates, '_open', side_effect=[io.BytesIO(json.dumps(data).encode()), io.BytesIO(f'{self.digest}  {filename}\n'.encode())]):
+            release = updates.check_for_update('0.9.0')
+        self.assertEqual(release.checksum, self.digest)
+        for bad_url in (url.replace('github.com', 'evil.test'), url.replace(self.tag, 'v0.9.0'), url + '?x=1', url.replace(filename, 'other.exe')):
+            bad = updates.Release(release.version, bad_url, self.digest, len(self.content))
+            with tempfile.TemporaryDirectory() as folder, self.assertRaises(updates.UpdateError):
+                updates.download_update(bad, folder)
+
     def test_no_release_and_unpublished(self):
         with patch.object(updates, "_open", side_effect=HTTPError(updates.API_URL, 404, "missing", {}, None)):
             self.assertIsNone(updates.check_for_update())
