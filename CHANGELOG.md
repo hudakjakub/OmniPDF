@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Show move and resize cursors over the selected area and its handles.
+
 ## 0.1.2
 
 - Preserve covered content when moving an area again and show the area while dragging.

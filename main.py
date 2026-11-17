@@ -292,6 +292,31 @@ class PageView(QGraphicsView):
         self.region_mode = enabled
         self.setCursor(Qt.CursorShape.CrossCursor if enabled else Qt.CursorShape.ArrowCursor)
 
+    def _area_hit(self, point):
+        if not self.region_mode or self.area_bbox is None or self.area_page != self.active_index or not self.page_rect.contains(point):
+            return None
+        rect = self.display_rect(self.area_bbox)
+        margin = 6 / self.transform().m11()
+        if not rect.adjusted(-margin, -margin, margin, margin).contains(point):
+            return None
+        x = -1 if abs(point.x() - rect.left()) <= margin else 1 if abs(point.x() - rect.right()) <= margin else 0
+        y = -1 if abs(point.y() - rect.top()) <= margin else 1 if abs(point.y() - rect.bottom()) <= margin else 0
+        return x, y
+
+    def _update_area_cursor(self, point):
+        hit = self._area_hit(point)
+        if hit is None:
+            cursor = Qt.CursorShape.CrossCursor
+        elif hit == (0, 0):
+            cursor = Qt.CursorShape.SizeAllCursor
+        elif not hit[0]:
+            cursor = Qt.CursorShape.SizeVerCursor
+        elif not hit[1]:
+            cursor = Qt.CursorShape.SizeHorCursor
+        else:
+            cursor = Qt.CursorShape.SizeFDiagCursor if hit[0] == hit[1] else Qt.CursorShape.SizeBDiagCursor
+        self.setCursor(cursor)
+
     def highlight_area(self, bbox, transform=None):
         self.area_bbox = bbox
         self.highlight(None)
@@ -326,25 +351,23 @@ class PageView(QGraphicsView):
         if not self.page_rect.contains(point):
             return
         self.setFocus()
-        if self.region_mode and self.area_bbox is not None and self.area_page == self.active_index:
+        hit = self._area_hit(point)
+        if hit is not None:
             rect = self.display_rect(self.area_bbox)
-            margin = 6 / self.transform().m11()
-            if rect.adjusted(-margin, -margin, margin, margin).contains(point):
-                x = -1 if abs(point.x() - rect.left()) <= margin else 1 if abs(point.x() - rect.right()) <= margin else 0
-                y = -1 if abs(point.y() - rect.top()) <= margin else 1 if abs(point.y() - rect.bottom()) <= margin else 0
-                self.area_drag = (QRectF(rect), x, y)
-                pixels = QRectF((rect.left() - self.page_rect.left()) * self.raster_scale,
+            x, y = hit
+            self.area_drag = (QRectF(rect), x, y)
+            pixels = QRectF((rect.left() - self.page_rect.left()) * self.raster_scale,
                                 (rect.top() - self.page_rect.top()) * self.raster_scale,
                                 rect.width() * self.raster_scale, rect.height() * self.raster_scale).toAlignedRect()
-                pixmap = self.pixmap_item.pixmap().copy(pixels)
-                if not pixmap.isNull():
-                    self.area_preview = self.scene().addPixmap(pixmap)
-                    self.area_preview.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
-                    self.area_preview.setZValue(1.5)
-                    self.area_preview.setPos(rect.topLeft())
-                    self.area_preview.setTransform(QTransform.fromScale(rect.width() / pixmap.width(), rect.height() / pixmap.height()))
-                self.start_point = point
-                return
+            pixmap = self.pixmap_item.pixmap().copy(pixels)
+            if not pixmap.isNull():
+                self.area_preview = self.scene().addPixmap(pixmap)
+                self.area_preview.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+                self.area_preview.setZValue(1.5)
+                self.area_preview.setPos(rect.topLeft())
+                self.area_preview.setTransform(QTransform.fromScale(rect.width() / pixmap.width(), rect.height() / pixmap.height()))
+            self.start_point = point
+            return
         self.start_point = point
         self.anchor_cursor = None
         self.dragging_text = False
@@ -392,6 +415,8 @@ class PageView(QGraphicsView):
             point = self.mapToScene(event.position().toPoint())
             over_text = any(self.display_rect(s['bbox']).contains(point) for s in self.areas)
             self.setCursor(Qt.CursorShape.IBeamCursor if over_text else Qt.CursorShape.ArrowCursor)
+        elif self.start_point is None:
+            self._update_area_cursor(self.mapToScene(event.position().toPoint()))
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -404,6 +429,7 @@ class PageView(QGraphicsView):
                     self.scene().removeItem(self.area_preview)
                     self.area_preview = None
                 self.area_changed.emit(self.area_bbox)
+                self._update_area_cursor(point)
                 return
             if not self.region_mode:
                 if self.dragging_text:
@@ -419,6 +445,7 @@ class PageView(QGraphicsView):
             if rect.width() >= 6 and rect.height() >= 6:
                 bbox = pymupdf.Rect(rect.x() - self.page_rect.x(), rect.y() - self.page_rect.y(), rect.right() - self.page_rect.x(), rect.bottom() - self.page_rect.y()) * self.derotation
                 self.region.emit(tuple(bbox))
+                self._update_area_cursor(point)
             else:
                 self.selection_cleared.emit()
             return
@@ -1478,6 +1505,7 @@ class Editor(QMainWindow):
         self.view.area_bbox = None
         self.view.area_page = None
         self.view.area_drag = None
+        self.view.setCursor(Qt.CursorShape.CrossCursor if self.view.region_mode else Qt.CursorShape.ArrowCursor)
         if self.view.area_preview is not None:
             self.view.scene().removeItem(self.view.area_preview)
             self.view.area_preview = None

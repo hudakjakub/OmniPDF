@@ -616,6 +616,39 @@ class EditorTests(unittest.TestCase):
         window.undo()
         self.assertAlmostEqual(window.pdf.spans(0)[0]['bbox'][0], 50, delta=1)
 
+    def test_area_cursor_matches_move_and_resize_handles(self):
+        window = self.window
+        view = window.view
+        window.cover_button.click()
+        window.select_region((60, 160, 240, 280))
+        for zoom in (1, 1.5):
+            if zoom != 1:
+                view.zoom(zoom)
+            rect = view.display_rect(window.selection['bbox'])
+            cases = [
+                (rect.center(), Qt.CursorShape.SizeAllCursor),
+                (rect.topLeft(), Qt.CursorShape.SizeFDiagCursor),
+                (rect.bottomRight(), Qt.CursorShape.SizeFDiagCursor),
+                (rect.topRight(), Qt.CursorShape.SizeBDiagCursor),
+                (rect.bottomLeft(), Qt.CursorShape.SizeBDiagCursor),
+                (QPointF(rect.left(), rect.center().y()), Qt.CursorShape.SizeHorCursor),
+                (QPointF(rect.right(), rect.center().y()), Qt.CursorShape.SizeHorCursor),
+                (QPointF(rect.center().x(), rect.top()), Qt.CursorShape.SizeVerCursor),
+                (QPointF(rect.center().x(), rect.bottom()), Qt.CursorShape.SizeVerCursor),
+                (rect.topLeft() - QPointF(20, 20), Qt.CursorShape.CrossCursor),
+            ]
+            for point, expected in cases:
+                QTest.mouseMove(view.viewport(), view.mapFromScene(point))
+                self.assertEqual(view.viewport().cursor().shape(), expected)
+        point = view.mapFromScene(rect.topLeft())
+        QTest.mouseMove(view.viewport(), point)
+        QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+        QTest.mouseMove(view.viewport(), point + QPoint(12, 12))
+        self.assertEqual(view.viewport().cursor().shape(), Qt.CursorShape.SizeFDiagCursor)
+        QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=point + QPoint(12, 12))
+        window.cancel_selection()
+        self.assertEqual(view.viewport().cursor().shape(), Qt.CursorShape.ArrowCursor)
+
     def test_area_move_back_preserves_covered_content_and_shows_drag_preview(self):
         window = self.window
         view = window.view
