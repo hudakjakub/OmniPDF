@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.11
+
+- Show a navigable document preview before printing.
+
 ## 0.1.10
 
 - Print documents with Ctrl+P and the system print dialog.

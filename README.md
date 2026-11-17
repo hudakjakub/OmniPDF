@@ -54,7 +54,7 @@ Kompaktný klasický panel spája všetko do jedného riadka: názov dokumentu a
 
 Klávesové skratky: **Ctrl+O** otvorí súbor, **Ctrl+S** alebo **Ctrl+Shift+S** uloží kópiu, **Ctrl+Z** vráti úpravu, **Ctrl+Y** alebo **Ctrl+Shift+Z** ju zopakuje. **Ctrl++** alebo **Ctrl+=** priblíži dokument, **Ctrl+-** ho oddiali a **Ctrl+0** prispôsobí šírke okna. **Escape** zruší výber a **Delete** vymaže obsah vybraný na strane; pri písaní v textovom poli fungujú bežné skratky pre text.
 
-Dokument vytlačíte ikonou tlačiarne alebo skratkou **Ctrl+P**. V tlačovom dialógu môžete vybrať tlačiareň, aktuálnu stranu alebo rozsah strán a ďalšie nastavenia tlače. Strany sa prispôsobia tlačiteľnej oblasti papiera.
+Dokument vytlačíte ikonou tlačiarne alebo skratkou **Ctrl+P**. Pred tlačou si môžete prezrieť všetky strany. V nasledujúcom systémovom dialógu vyberiete tlačiareň, aktuálnu stranu alebo rozsah strán a ďalšie nastavenia tlače. Náhľad používa pôvodné nastavenia tlačiarne; zmeny v systémovom dialógu sa v ňom spätne neprejavia. Strany sa prispôsobia tlačiteľnej oblasti papiera.
 
 ## Obmedzenia
 

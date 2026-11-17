@@ -10,7 +10,7 @@ from pathlib import Path
 import pymupdf
 from PySide6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QTransform
-from PySide6.QtPrintSupport import QAbstractPrintDialog, QPrintDialog, QPrinter
+from PySide6.QtPrintSupport import QAbstractPrintDialog, QPrintDialog, QPrintPreviewWidget, QPrinter
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame,
     QGraphicsDropShadowEffect, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
@@ -1098,20 +1098,67 @@ class Editor(QMainWindow):
         return not self.pending or self.apply_change()
 
     def print_document(self):
-        if not self.pdf or self._busy() or not self.pdf.page_count:
+        if not self.pdf or self._busy() or not self.pdf.page_count or not self._discard_pending():
             return
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         printer.setDocName(self.pdf.source.name)
+        if not self._show_print_preview(printer):
+            return
         dialog = QPrintDialog(printer, self)
         dialog.setMinMax(1, self.pdf.page_count)
         dialog.setOption(QAbstractPrintDialog.PrintDialogOption.PrintPageRange, True)
         dialog.setOption(QAbstractPrintDialog.PrintDialogOption.PrintCurrentPage, True)
         dialog.setOption(QAbstractPrintDialog.PrintDialogOption.PrintSelection, False)
-        if dialog.exec() != QDialog.DialogCode.Accepted or not self._discard_pending():
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
+        if self._paint_print_pages(printer):
+            self.statusBar().showMessage(_('Tlačová úloha bola odoslaná.'))
+
+    def _show_print_preview(self, printer):
+        if not printer.isValid():
+            printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+            printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        dialog = QDialog(self)
+        dialog.setObjectName('printPreview')
+        dialog.setWindowTitle(_('Náhľad tlače'))
+        dialog.resize(900, 700)
+        layout = QVBoxLayout(dialog)
+        preview = QPrintPreviewWidget(printer, dialog)
+        preview.setObjectName('printPreviewPages')
+        layout.addWidget(preview)
+        controls = QHBoxLayout()
+        previous = QPushButton(_('Predchádzajúca strana'))
+        next_page = QPushButton(_('Nasledujúca strana'))
+        next_page.setObjectName('previewNext')
+        previous.clicked.connect(lambda: preview.setCurrentPage(preview.currentPage() - 1))
+        next_page.clicked.connect(lambda: preview.setCurrentPage(preview.currentPage() + 1))
+        counter = QLabel()
+        def update_controls():
+            current, total = preview.currentPage(), preview.pageCount()
+            counter.setText(f'{current} / {total}')
+            previous.setEnabled(current > 1)
+            next_page.setEnabled(current < total)
+        preview.previewChanged.connect(update_controls)
+        controls.addWidget(previous)
+        controls.addWidget(counter)
+        controls.addWidget(next_page)
+        controls.addStretch()
+        cancel = QPushButton(_('Zrušiť'))
+        cancel.clicked.connect(dialog.reject)
+        proceed = QPushButton(_('Tlačiť…'))
+        proceed.clicked.connect(dialog.accept)
+        preview.paintRequested.connect(lambda device: proceed.setEnabled(self._paint_print_pages(device, preview=True)))
+        controls.addWidget(cancel)
+        controls.addWidget(proceed)
+        layout.addLayout(controls)
+        return dialog.exec() == QDialog.DialogCode.Accepted
+
+    def _paint_print_pages(self, printer, preview=False):
         painter = QPainter()
         try:
-            if printer.printRange() == QPrinter.PrintRange.CurrentPage:
+            if preview:
+                pages = list(range(self.pdf.page_count))
+            elif printer.printRange() == QPrinter.PrintRange.CurrentPage:
                 pages = [self.page_index]
             elif printer.printRange() == QPrinter.PrintRange.PageRange:
                 ranges = printer.pageRanges()
@@ -1126,9 +1173,9 @@ class Editor(QMainWindow):
                 raise ValueError(_('Vybraný rozsah strán nemožno vytlačiť.'))
             if not pages:
                 raise ValueError(_('Vybraný rozsah strán nemožno vytlačiť.'))
-            if printer.pageOrder() == QPrinter.PageOrder.LastPageFirst:
+            if not preview and printer.pageOrder() == QPrinter.PageOrder.LastPageFirst:
                 pages.reverse()
-            if not printer.supportsMultipleCopies():
+            if not preview and not printer.supportsMultipleCopies():
                 count = max(1, printer.copyCount())
                 pages = pages * count if printer.collateCopies() else [page for page in pages for _copy in range(count)]
             if not painter.begin(printer):
@@ -1138,7 +1185,7 @@ class Editor(QMainWindow):
                 if position and not printer.newPage():
                     raise RuntimeError(_('Tlač strany zlyhala.'))
                 page = self.pdf.document[index]
-                scale = min(printer.resolution() / 72, 300 / 72, math.sqrt(16_000_000 / page.rect.get_area()))
+                scale = min(printer.resolution() / 72, (72 if preview else 300) / 72, math.sqrt(16_000_000 / page.rect.get_area()))
                 pixmap = self.pdf.render(index, scale)
                 image = QImage(pixmap.samples, pixmap.width, pixmap.height, pixmap.stride, QImage.Format.Format_RGB888).copy()
                 factor = min(bounds.width() / image.width(), bounds.height() / image.height())
@@ -1151,8 +1198,8 @@ class Editor(QMainWindow):
                 printer.abort()
                 painter.end()
             self._error(exc)
-            return
-        self.statusBar().showMessage(_('Tlačová úloha bola odoslaná.'))
+            return False
+        return True
 
     def _leave_document(self):
         if self._busy():

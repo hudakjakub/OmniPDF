@@ -8,10 +8,10 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 import pymupdf
 from PySide6.QtGui import QPageRanges
-from PySide6.QtCore import Qt
-from PySide6.QtPrintSupport import QPrinter
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtPrintSupport import QPrinter, QPrintPreviewWidget
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QPushButton
 
 from main import Editor
 
@@ -33,6 +33,8 @@ class PrintingTests(unittest.TestCase):
             doc.save(self.source)
         self.original = self.source.read_bytes()
         self.window = Editor()
+        self.preview_patch = patch.object(self.window, '_show_print_preview', return_value=True)
+        self.preview_patch.start()
         self.window._auto_ocr = lambda *args: None
         self.window._error = lambda error: self.fail(str(error))
         self.window.show()
@@ -40,6 +42,7 @@ class PrintingTests(unittest.TestCase):
         self.app.processEvents()
 
     def tearDown(self):
+        self.preview_patch.stop()
         self.window.pdf.close()
         self.window.pdf = None
         self.window.close()
@@ -65,15 +68,45 @@ class PrintingTests(unittest.TestCase):
                 self.assertTrue(all(abs(a - b) <= 2 for a, b in zip(actual, expected)), actual)
         self.assertEqual(self.source.read_bytes(), self.original)
 
-    def test_cancelled_dialog_does_not_apply_pending_edit(self):
+    def test_cancelled_dialog_does_not_print(self):
         self.window.select_text(self.window.pdf.spans(0)[0])
-        self.window.text.setPlainText('Pending')
+        self.window.text.setPlainText('Best')
         with patch('main.QPrintDialog') as dialog:
             dialog.return_value.exec.return_value = QDialog.DialogCode.Rejected
             self.window.print_document()
-        self.assertTrue(self.window.pending)
-        self.assertNotIn('Pending', self.window.pdf.document[0].get_text())
+        self.assertFalse(self.window.pending)
+        self.assertIn('Best', self.window.pdf.document[0].get_text())
         self.window.clear_selection()
+
+    def test_cancelling_preview_does_not_open_print_dialog(self):
+        self.preview_patch.stop()
+        with patch.object(self.window, '_show_print_preview', return_value=False), patch('main.QPrintDialog') as dialog:
+            self.window.print_document()
+        dialog.assert_not_called()
+
+    def test_preview_shows_document_and_allows_page_navigation(self):
+        self.preview_patch.stop()
+        observed = {}
+        def inspect():
+            dialog = self.window.findChild(QDialog, 'printPreview')
+            if dialog is None:
+                observed['error'] = 'Preview dialog not found'
+                return
+            preview = dialog.findChild(QPrintPreviewWidget, 'printPreviewPages')
+            observed['pages'] = preview.pageCount()
+            observed['current'] = preview.currentPage()
+            image = preview.grab().toImage()
+            observed['has_red'] = any(image.pixelColor(x, y).red() > 200 and image.pixelColor(x, y).green() < 80
+                                      for y in range(0, image.height(), 10) for x in range(0, image.width(), 10))
+            dialog.findChild(QPushButton, 'previewNext').click()
+            observed['next'] = preview.currentPage()
+            dialog.reject()
+        QTimer.singleShot(250, inspect)
+        printer = QPrinter()
+        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        printer.setOutputFileName(str(self.root / 'preview.pdf'))
+        self.assertFalse(self.window._show_print_preview(printer))
+        self.assertEqual(observed, {'pages': 3, 'current': 1, 'has_red': True, 'next': 2})
 
     def test_print_current_page_applies_pending_edit(self):
         output = self.root / 'current.pdf'

@@ -16,6 +16,8 @@ EN = {
     'Otvoriť súbor (Ctrl+O)': 'Open file (Ctrl+O)',
     'Uložiť kópiu (Ctrl+S alebo Ctrl+Shift+S)': 'Save a copy (Ctrl+S or Ctrl+Shift+S)',
     'Tlačiť (Ctrl+P)': 'Print (Ctrl+P)',
+    'Náhľad tlače': 'Print preview',
+    'Tlačiť…': 'Print…',
     'Vybraný rozsah strán nemožno vytlačiť.': 'The selected page range cannot be printed.',
     'Tlačiareň sa nepodarilo spustiť.': 'Could not start the printer.',
     'Tlač strany zlyhala.': 'Could not print the page.',
