@@ -150,7 +150,7 @@ def check_for_update(current_version=VERSION):
     return Release(version, url, checksum, size)
 
 
-def download_update(release, destination_dir, *, cancelled=None):
+def download_update(release, destination_dir, *, cancelled=None, progress=None):
     tag = "v" + release.version
     _version(tag)
     filename = _installer_filename(release)
@@ -178,6 +178,8 @@ def download_update(release, destination_dir, *, cancelled=None):
                         raise UpdateError("Installer download is too large.")
                     digest.update(chunk)
                     output.write(chunk)
+                    if progress:
+                        progress(total, release.size)
         if cancelled and cancelled():
             raise UpdateError("Update cancelled.")
         if total != release.size or digest.hexdigest() != release.checksum.lower():

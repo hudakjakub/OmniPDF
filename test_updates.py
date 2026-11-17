@@ -116,6 +116,15 @@ class UpdateTests(unittest.TestCase):
                 updates.download_update(release, folder)
             self.assertEqual(list(Path(folder).iterdir()), [])
 
+    def test_download_reports_verified_size_progress(self):
+        release = updates.Release('0.10.0', self.url, self.digest, len(self.content))
+        progress = []
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(updates, '_open', return_value=io.BytesIO(self.content)):
+                path = updates.download_update(release, folder, progress=lambda total, size: progress.append((total, size)))
+            self.assertEqual(path.read_bytes(), self.content)
+            self.assertEqual(progress[-1], (len(self.content), len(self.content)))
+
     def test_launch_args(self):
         with patch.object(updates.subprocess, "Popen") as popen:
             updates.launch_installer("C:/temp/setup.exe", "C:/Program Files/Omni PDF", 42)

@@ -10,11 +10,12 @@ from unittest.mock import patch
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 import pymupdf
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QPushButton
 
 from main import Editor
+import updates
 from updates import Release
 
 
@@ -76,8 +77,8 @@ class UpdateUiTests(unittest.TestCase):
              patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.No):
             self.window.check_updates()
             self.wait_for_worker()
-        self.assertEqual(self.window.ready_update, (self.release, self.installer))
-        self.assertTrue(callable(download.call_args.kwargs['cancelled']))
+        self.assertEqual(self.window.ready_update, (self.release, None))
+        download.assert_not_called()
         with patch.object(QMessageBox, 'question', side_effect=[QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Cancel]), \
              patch('main.updates.launch_installer') as launch:
             self.window._offer_update()
@@ -87,10 +88,14 @@ class UpdateUiTests(unittest.TestCase):
         output = self.root / 'copy.pdf'
         with patch.object(QMessageBox, 'question', side_effect=[QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Save]), \
              patch.object(QFileDialog, 'getSaveFileName', return_value=(str(output), 'PDF')), \
+             patch('main.updates.download_update', return_value=self.installer) as download, \
              patch('main.updates.launch_installer') as launch:
             self.window._offer_update()
             self.wait_for_worker()
             launch.assert_called_once()
+            self.assertTrue(callable(download.call_args.kwargs['cancelled']))
+            self.assertTrue(self.window._close_approved)
+            self.assertFalse(self.window.isVisible())
         with pymupdf.open(output) as saved:
             self.assertIn('Changed text', saved[0].get_text())
         self.assertEqual(source.read_bytes(), original)
@@ -106,6 +111,55 @@ class UpdateUiTests(unittest.TestCase):
             warning.assert_called_once()
         self.assertIsNone(self.window.ready_update)
         self.assertTrue(self.window.isVisible())
+
+    def test_download_progress_can_be_cancelled_without_installing(self):
+        self.window.ready_update = (self.release, None)
+        started = threading.Event()
+        def download(release, folder, *, cancelled, progress):
+            progress(25, 100)
+            started.set()
+            while not cancelled():
+                time.sleep(0.01)
+            raise RuntimeError('cancelled')
+        with patch('main.updates.download_update', side_effect=download), \
+             patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
+             patch('main.updates.launch_installer') as launch, patch.object(QMessageBox, 'warning') as warning:
+            self.window._offer_update()
+            self.assertTrue(started.wait(1))
+            QTest.qWait(50)
+            self.assertEqual(self.window.update_progress.value(), 25)
+            QTest.mouseClick(self.window.update_progress.findChild(QPushButton), Qt.MouseButton.LeftButton)
+            self.wait_for_worker()
+            launch.assert_not_called()
+            warning.assert_not_called()
+        self.assertIsNone(self.window.update_progress)
+        self.assertFalse(self.window._install_pending)
+        self.assertTrue(self.window.isVisible())
+
+    def test_downloaded_installer_is_verified_before_launch(self):
+        self.window.ready_update = (self.release, None)
+        self.installer.write_bytes(b'tampered')
+        with patch('main.updates.download_update', return_value=self.installer), \
+             patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
+             patch('main.updates.launch_installer') as launch, patch.object(QMessageBox, 'warning') as warning:
+            self.window._offer_update()
+            self.wait_for_worker()
+            launch.assert_not_called()
+            warning.assert_called_once()
+        self.assertIsNone(self.window.ready_update)
+        self.assertTrue(self.window.isVisible())
+
+    def test_windows_policy_block_explains_why_installer_could_not_start(self):
+        self.window._verified_update = (self.release, self.installer)
+        error = updates.UpdateError('Could not start the installer.')
+        error.__cause__ = OSError(22, 'blocked', None, 4551)
+        with patch('i18n.language', return_value='en'), \
+             patch('main.updates.launch_installer', side_effect=error), \
+             patch.object(QMessageBox, 'warning') as warning:
+            self.window._launch_update()
+        self.assertIn('Windows security policy', warning.call_args.args[2])
+        self.assertTrue(self.window.isVisible())
+        self.assertFalse(self.window._close_approved)
 
     def test_discarded_draft_does_not_block_update_after_verification(self):
         source = self.root / 'draft.pdf'

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.9
+
+- Ask before downloading updates, show cancellable download progress and restart after installation.
+- Explain when Windows security policy blocks the installer.
+
 ## 0.1.8
 
 - Publish stable download names while retaining a compatible installer for older updaters.

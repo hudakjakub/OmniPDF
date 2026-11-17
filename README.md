@@ -74,7 +74,7 @@ Test skutočného Windows OCR sa zapína premennou prostredia `RUN_WINDOWS_OCR=1
 
 ## Aktualizácie
 
-Ponuka pod názvom **Omni PDF** obsahuje verziu aplikácie, ručnú kontrolu a prepínač automatických aktualizácií. V EXE vydaní sa kontrola vykoná po spustení a následne každých šesť hodín. Novšia stabilná verzia sa stiahne na pozadí a pred spustením inštalátora sa overí jej veľkosť a SHA-256. Koncepty, prerelease vydania a staršie verzie sa neinštalujú.
+Ponuka pod názvom **Omni PDF** obsahuje verziu aplikácie, ručnú kontrolu a prepínač automatickej kontroly aktualizácií. V EXE vydaní sa kontrola vykoná po spustení a následne každých šesť hodín. Ak je dostupná novšia stabilná verzia, aplikácia sa opýta na súhlas. Až po jeho udelení zobrazí priebeh sťahovania a pred spustením inštalátora overí jeho veľkosť a SHA-256. Sťahovanie možno zrušiť. Koncepty, prerelease vydania a staršie verzie sa neinštalujú.
 
 Inštaláciu možno odložiť. Pred reštartom aplikácia ponúkne uloženie rozpracovaného PDF; zrušenie uloženia zruší aj inštaláciu. Inštalátor čaká na riadne ukončenie aplikácie a násilne ju neukončuje. Po aktualizácii spustí novú verziu. Prvá aktualizácia prenosného EXE použije štandardný priečinok `%LOCALAPPDATA%\Programs\OmniPDF`; ďalšie aktualizácie nainštalovanej aplikácie zachovajú jej umiestnenie. V zdrojovom spustení je dostupná ručná kontrola a odkaz na vydanie, nie samoinštalácia do Pythonu.
 
