@@ -798,6 +798,7 @@ class Editor(QMainWindow):
         self.cancel_button.setIconSize(QSize(16, 16))
         form.addLayout(panel_header)
         self.selection_preview = QLabel()
+        self.selection_preview.setObjectName('selectionPreview')
         self.selection_preview.setFixedHeight(120)
         self.selection_preview.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.selection_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1536,8 +1537,9 @@ class Editor(QMainWindow):
         painter.setPen(QPen(QColor('#087f83'), max(1, scale)))
         painter.drawRect(QRectF(box.x0 * scale - pix.x, box.y0 * scale - pix.y, box.width * scale, box.height * scale))
         painter.end()
+        bounds = self.selection_preview.contentsRect()
         self.selection_preview.setPixmap(QPixmap.fromImage(image).scaled(
-            max(1, self.selection_preview.width()), self.selection_preview.height(),
+            max(1, bounds.width()), max(1, bounds.height()),
             Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.selection_preview.show()
 
@@ -2013,6 +2015,7 @@ QToolTip { background: #ffffff; color: #243642; border: 1px solid #cad5dc; paddi
 #thumbnails { background: #f5f8fa; border: none; border-right: 1px solid #dce3e8; }
 #thumbnails::item { color: #243642; border: 1px solid transparent; border-radius: 4px; }
 #thumbnails::item:selected { background: #dcefee; color: #07686c; border-color: #087f83; }
+#selectionPreview { background: #ffffff; border: 1px solid #dce3e8; border-radius: 4px; }
 QPushButton#appendPdf { color: #8b9aa3; background: #ffffff; border: 2px dashed #b8c2ca; border-radius: 3px; padding: 0; font-size: 64px; font-weight: 400; }
 QPushButton#appendPdf:hover, QPushButton#appendPdf:focus, QPushButton#appendPdf[dragActive="true"] { color: #087f83; border-color: #087f83; background: #eef8f7; }
 QPushButton#appendPdf:disabled { color: #b8c2ca; background: #f5f8fa; border-color: #dce3e8; }

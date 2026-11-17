@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.12
+
+- Add a subtle border around the selected text preview.
+
 ## 0.1.11
 
 - Show a navigable document preview before printing.
