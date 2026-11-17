@@ -20,6 +20,8 @@ EN = {
     'Tlačiť…': 'Print…',
     'Vybraný rozsah strán nemožno vytlačiť.': 'The selected page range cannot be printed.',
     'Tlačiareň sa nepodarilo spustiť.': 'Could not start the printer.',
+    'Systémový tlačový dialóg sa nepodarilo spustiť.': 'Could not start the Windows print dialog.',
+    'Systémovú tlač sa nepodarilo dokončiť.': 'Could not complete the Windows print job.',
     'Tlač strany zlyhala.': 'Could not print the page.',
     'Tlač sa nepodarilo dokončiť.': 'Could not finish printing.',
     'Tlačová úloha bola odoslaná.': 'The print job was submitted.',

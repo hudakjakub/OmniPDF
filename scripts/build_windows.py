@@ -1,6 +1,7 @@
 """Build the Windows portable executable, installer and checksums."""
 import hashlib
 import importlib.metadata
+import json
 import os
 from pathlib import Path
 import re
@@ -79,6 +80,28 @@ def main():
                 destination = licenses / distribution / Path(*entry.parts[1:])
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(package.locate_file(entry), destination)
+    dotnet = shutil.which('dotnet')
+    if not dotnet:
+        raise FileNotFoundError('The .NET 10 SDK is required to build Windows printing')
+    native_printer = build / 'windows_print'
+    native_env = build_environment()
+    native_env['DOTNET_CLI_TELEMETRY_OPTOUT'] = '1'
+    subprocess.run([dotnet, 'publish', str(ROOT / 'windows_print' / 'WindowsPrint.csproj'),
+                    '-c', 'Release', '-p:Platform=x64', '--self-contained', 'true',
+                    '-o', str(native_printer), '--nologo'], check=True, env=native_env)
+    assets = json.loads((ROOT / 'windows_print' / 'obj' / 'project.assets.json').read_text(encoding='utf-8'))
+    for library in assets['libraries'].values():
+        if library.get('type') != 'package':
+            continue
+        for folder in assets['packageFolders']:
+            package = Path(folder) / library['path']
+            if package.is_dir():
+                for item in package.iterdir():
+                    if item.is_file() and item.name.lower().startswith(('license', 'notice')):
+                        target = licenses / 'Windows-print' / library['path'] / item.name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(item, target)
+                break
     release = ROOT / 'release'
     release.mkdir(exist_ok=True)
     app = QApplication.instance() or QApplication([])
@@ -90,6 +113,7 @@ def main():
                     '--name', 'OmniPDF', '--specpath', str(build), '--icon', str(build / 'omni.ico'), '--version-file', str(build / 'version.txt'),
                     *sum((['--add-data', f'{ROOT / name};{dest}'] for name, dest in
                           [('assets', 'assets'), ('windows_ocr.ps1', '.'), ('LICENSE', '.'), ('THIRD_PARTY_NOTICES.md', '.'),
+                           (str(native_printer), 'windows_print'),
                            (str(Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)) / 'qtbase_sk.qm'), 'translations'),
                            (str(licenses), 'licenses')]), []),
                     'main.py'], check=True, env=build_environment())

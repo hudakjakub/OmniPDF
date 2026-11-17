@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.13
+
+- Provide document preview in the Windows print dialog when the print host is available.
+
 ## 0.1.12
 
 - Add a subtle border around the selected text preview.

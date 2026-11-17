@@ -24,6 +24,7 @@ from windows_ocr import recognize
 from app_info import APP_NAME, VERSION, PROJECT_URL
 from i18n import _, configure_language
 import updates
+from native_print import helper_ready, print_native
 from window_chrome import configure_title_bar, set_app_id, create_app_mutex, release_app_mutex
 
 
@@ -50,6 +51,8 @@ ERRORS = {
     'The selected text is no longer available.': 'Výber už nie je aktuálny. Označte text znova.',
     'Select text to delete.': 'Najprv označte text, ktorý chcete vymazať.',
     'There is no previous edit to update.': 'Predchádzajúcu úpravu už nemožno aktualizovať.',
+    'The Windows print dialog could not be started.': 'Systémový tlačový dialóg sa nepodarilo spustiť.',
+    'The Windows print dialog could not complete the print job.': 'Systémovú tlač sa nepodarilo dokončiť.',
 }
 
 
@@ -1101,6 +1104,27 @@ class Editor(QMainWindow):
     def print_document(self):
         if not self.pdf or self._busy() or not self.pdf.page_count or not self._discard_pending():
             return
+        native_helper = Path(__file__).with_name('windows_print') / 'WindowsPrint.exe'
+        if not getattr(sys, 'frozen', False):
+            native_helper = Path(__file__).parent / 'build' / 'release-inputs' / 'windows_print' / 'WindowsPrint.exe'
+        if sys.platform == 'win32' and native_helper.is_file():
+            self.setEnabled(False)
+            error = None
+            available = False
+            try:
+                available = helper_ready(native_helper)
+                if available:
+                    if print_native(self.pdf, native_helper):
+                        self.statusBar().showMessage(_('Tlačová úloha bola odoslaná.'))
+            except Exception as exc:
+                error = exc
+            finally:
+                self.setEnabled(True)
+            if error is not None:
+                self._error(error)
+                return
+            if available:
+                return
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         printer.setDocName(self.pdf.source.name)
         if not self._show_print_preview(printer):
@@ -2105,6 +2129,8 @@ def smoke_test(application, output):
         root = Path(__file__).resolve().parent
         result['resources_ok'] = all((root / path).is_file() for path in
             ('assets/omni.svg', 'assets/check.svg', 'windows_ocr.ps1', 'LICENSE', 'THIRD_PARTY_NOTICES.md'))
+        if result['frozen']:
+            result['resources_ok'] = result['resources_ok'] and (root / 'windows_print' / 'WindowsPrint.exe').is_file()
         with tempfile.TemporaryDirectory(prefix='omnipdf-smoke-') as directory:
             source = Path(directory) / 'source.pdf'
             with pymupdf.open() as document:

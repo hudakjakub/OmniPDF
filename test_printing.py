@@ -33,6 +33,8 @@ class PrintingTests(unittest.TestCase):
             doc.save(self.source)
         self.original = self.source.read_bytes()
         self.window = Editor()
+        self.helper_patch = patch('main.helper_ready', return_value=False)
+        self.helper_patch.start()
         self.preview_patch = patch.object(self.window, '_show_print_preview', return_value=True)
         self.preview_patch.start()
         self.window._auto_ocr = lambda *args: None
@@ -42,6 +44,7 @@ class PrintingTests(unittest.TestCase):
         self.app.processEvents()
 
     def tearDown(self):
+        self.helper_patch.stop()
         self.preview_patch.stop()
         self.window.pdf.close()
         self.window.pdf = None
@@ -158,6 +161,21 @@ class PrintingTests(unittest.TestCase):
         with patch('main.QPrintDialog') as dialog:
             QTest.keyClick(self.window, Qt.Key.Key_P, Qt.KeyboardModifier.ControlModifier)
             dialog.assert_not_called()
+
+    def test_windows_helper_opens_system_preview_with_current_document(self):
+        with patch('main.sys.platform', 'win32'), patch('main.Path.is_file', return_value=True), patch('main.helper_ready', return_value=True), \
+             patch('main.print_native', return_value=True) as native, patch('main.QPrintDialog') as dialog:
+            self.window.print_document()
+        native.assert_called_once()
+        self.assertIs(native.call_args.args[0], self.window.pdf)
+        dialog.assert_not_called()
+
+    def test_unavailable_windows_helper_keeps_existing_print_dialog(self):
+        with patch('main.sys.platform', 'win32'), patch('main.Path.is_file', return_value=True), \
+             patch('main.helper_ready', return_value=False), patch('main.QPrintDialog') as dialog:
+            dialog.return_value.exec.return_value = QDialog.DialogCode.Rejected
+            self.window.print_document()
+        dialog.assert_called_once()
 
     def test_multiple_copies_when_driver_does_not_support_them(self):
         output = self.root / 'copies.pdf'

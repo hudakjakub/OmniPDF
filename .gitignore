@@ -5,6 +5,8 @@ tmp/
 build/
 dist/
 release/
+windows_print/bin/
+windows_print/obj/
 .pytest_cache/
 .env
 *.log

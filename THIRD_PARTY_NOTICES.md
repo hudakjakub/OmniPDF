@@ -35,6 +35,13 @@ The exact installed dependency licenses are bundled with the executable.
 Python is provided under the Python Software Foundation License and its
 included third-party notices: https://docs.python.org/3/license.html
 
+## Windows print support
+
+The print preview host uses Microsoft Windows App SDK and .NET. Their licenses
+and notices from the build packages are included in the application bundle.
+https://github.com/microsoft/WindowsAppSDK
+https://github.com/dotnet/runtime
+
 ## PyInstaller
 
 PyInstaller is a build tool under GPL v2 or later with its bootloader exception,
