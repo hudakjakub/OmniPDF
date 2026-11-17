@@ -1,0 +1,28 @@
+import subprocess
+import unittest
+from unittest.mock import patch
+
+from windows_ocr import recognize
+
+
+class WindowsOcrTests(unittest.TestCase):
+    @patch("windows_ocr.subprocess.run")
+    def test_line_result(self, run):
+        run.return_value = subprocess.CompletedProcess([], 0, b'[{"text":"invoice","bbox":[1,2,3,4]}]', b'')
+        self.assertEqual(recognize("image.png"), [{"text": "invoice", "bbox": (1, 2, 3, 4)}])
+
+    @patch("windows_ocr.subprocess.run")
+    def test_missing_language(self, run):
+        run.return_value = subprocess.CompletedProcess([], 1, b'', b'NO_OCR_LANGUAGE')
+        with self.assertRaisesRegex(RuntimeError, "jazyk"):
+            recognize("image.png")
+
+    @patch("windows_ocr.subprocess.run")
+    def test_invalid_result(self, run):
+        run.return_value = subprocess.CompletedProcess([], 0, b'invalid', b'')
+        with self.assertRaisesRegex(RuntimeError, "neplatn"):
+            recognize("image.png")
+
+
+if __name__ == "__main__":
+    unittest.main()
