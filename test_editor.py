@@ -298,7 +298,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(window.ocr_areas, {})
         window.delete_page_action.trigger()
         self.assertEqual(window.page_label.text(), '1 / 1')
-        self.assertFalse(window.delete_page_action.isEnabled())
+        self.assertTrue(window.delete_page_action.isEnabled())
         with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(self.source), 'PDF')):
             window.insert_pdf_action.trigger()
         self.assertEqual(window.page_label.text(), '2 / 3')
@@ -329,6 +329,30 @@ class EditorTests(unittest.TestCase):
             window.insert_pdf_action.trigger()
         self.assertEqual(window.pdf.page_count, 2)
         self.assertFalse(window.pdf.dirty)
+
+    def test_delete_last_page_add_pdf_and_history(self):
+        window = self.window
+        original = self.source.read_bytes()
+        window.delete_page()
+        window.delete_page()
+        self.assertEqual(window.pdf.page_count, 0)
+        self.assertEqual(window.page_label.text(), '0 / 0')
+        self.assertEqual(window.thumbnails.count(), 1)
+        self.assertIs(window.thumbnails.item(0), window.add_pdf_item)
+        self.assertTrue(window.add_pdf_card.button.isEnabled())
+        self.assertFalse(window.save_button.isEnabled())
+        window.undo()
+        self.assertEqual(window.pdf.page_count, 1)
+        window.redo()
+        self.assertEqual(window.pdf.page_count, 0)
+        with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(self.source), 'PDF')):
+            window.add_pdf_card.button.click()
+        self.assertEqual(window.pdf.page_count, 2)
+        window.undo()
+        self.assertEqual(window.pdf.page_count, 0)
+        window.redo()
+        self.assertEqual(window.pdf.page_count, 2)
+        self.assertEqual(self.source.read_bytes(), original)
 
     def test_append_card_click_adds_pdf_after_last_page_and_supports_history(self):
         window = self.window
@@ -555,11 +579,66 @@ class EditorTests(unittest.TestCase):
         QTest.mousePress(viewport, Qt.MouseButton.LeftButton, pos=start)
         QTest.mouseMove(viewport, end)
         QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, pos=end)
+        self.assertIn('INVOICE 12345', window.pdf.document[0].get_text())
+        self.assertEqual(window.selection['kind'], 'area')
+        QTest.keyClick(window.view, Qt.Key.Key_Delete)
         self.assertNotIn('INVOICE 12345', window.pdf.document[0].get_text())
         pixmap = window.pdf.document[0].get_pixmap()
         self.assertEqual(pixmap.pixel(int(rect.x0 + 2), int(rect.y0 + 2)), (255, 255, 255))
         window.undo()
         self.assertIn('INVOICE 12345', window.pdf.document[0].get_text())
+
+    def test_area_move_resize_and_undo(self):
+        window = self.window
+        view = window.view
+        window.cover_button.click()
+        bbox = tuple(pymupdf.Rect(window.pdf.spans(0)[0]['bbox']) + (-2, -2, 2, 2))
+        window.select_region(bbox)
+        rect = view.display_rect(bbox)
+        start = view.mapFromScene(rect.center())
+        end = start + QPoint(60, 50)
+        QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(view.viewport(), end)
+        QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
+        moved = pymupdf.Rect(window.selection['bbox'])
+        self.assertGreater(moved.x0, bbox[0] + 10)
+        self.assertNotIn('INVOICE', window.pdf.document[0].get_text())
+        image_rect = window.pdf.document[0].get_image_rects(window.pdf.document[0].get_images()[0][0])[0]
+        self.assertAlmostEqual(image_rect.x0, moved.x0, delta=1)
+        rect = view.display_rect(moved)
+        start = view.mapFromScene(rect.bottomRight())
+        end = start + QPoint(30, 25)
+        QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(view.viewport(), end)
+        QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
+        self.assertGreater(pymupdf.Rect(window.selection['bbox']).width, moved.width)
+        window.undo()
+        window.undo()
+        self.assertAlmostEqual(window.pdf.spans(0)[0]['bbox'][0], 50, delta=1)
+
+    def test_area_move_on_rotated_page(self):
+        path = self.root / 'rotated-area.pdf'
+        with pymupdf.open() as doc:
+            page = doc.new_page(width=500, height=700)
+            page.insert_text((50, 80), 'Rotated text', fontsize=20)
+            page.set_rotation(90)
+            doc.save(path)
+        window = self.window
+        window.open_file(path=path)
+        window.cover_button.click()
+        bbox = tuple(pymupdf.Rect(window.pdf.spans(0)[0]['bbox']) + (-2, -2, 2, 2))
+        window.select_region(bbox)
+        view = window.view
+        start = view.mapFromScene(view.display_rect(bbox).center())
+        end = start + QPoint(40, 40)
+        QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(view.viewport(), end)
+        QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
+        self.assertNotEqual(pymupdf.Rect(window.selection['bbox']), pymupdf.Rect(bbox))
+        self.assertNotIn('Rotated text', window.pdf.document[0].get_text())
+        self.assertTrue(window.pdf.document[0].get_images())
+        window.undo()
+        self.assertAlmostEqual(window.pdf.spans(0)[0]['bbox'][0], 50, delta=1)
 
     @unittest.skipUnless(os.getenv('RUN_WINDOWS_OCR') == '1', 'Opt-in integration with installed Windows OCR languages')
     def test_real_ocr_then_replace(self):

@@ -37,7 +37,6 @@ ERRORS = {
     'Only PDF, JPG and PNG files are supported.': 'Vyberte PDF alebo obrázok vo formáte JPG či PNG.',
     'The document has no pages.': 'Dokument nemá žiadnu stranu.',
     'Select a valid page.': 'Vyberte platnú stranu.',
-    'The last page cannot be deleted.': 'Poslednú stranu dokumentu nemožno odstrániť.',
     'Only PDF files can be inserted.': 'Na vloženie ďalších strán vyberte PDF súbor.',
     'Select a valid area inside the page.': 'Označte oblasť vnútri strany.',
     'Enter valid text and font size.': 'Zadajte platný text a veľkosť písma.',
@@ -60,6 +59,7 @@ class PageView(QGraphicsView):
     render_requested = Signal()
     zoom_changed = Signal(float)
     page_requested = Signal(int)
+    area_changed = Signal(object)
 
     def __init__(self):
         super().__init__()
@@ -78,6 +78,9 @@ class PageView(QGraphicsView):
         self.rotation = pymupdf.Matrix(1, 1)
         self.derotation = pymupdf.Matrix(1, 1)
         self.selection_item = None
+        self.area_bbox = None
+        self.area_page = None
+        self.area_drag = None
         self.start_point = None
         self.region_mode = False
         self.anchor_cursor = None
@@ -287,6 +290,25 @@ class PageView(QGraphicsView):
         self.region_mode = enabled
         self.setCursor(Qt.CursorShape.CrossCursor if enabled else Qt.CursorShape.ArrowCursor)
 
+    def highlight_area(self, bbox, transform=None):
+        self.area_bbox = bbox
+        self.highlight(None)
+        if bbox is None:
+            return
+        box = pymupdf.Rect(bbox)
+        rect = transform.mapRect(QRectF(box.x0, box.y0, box.width, box.height)) if transform is not None else self.display_rect(bbox)
+        path = QPainterPath()
+        path.addRect(rect)
+        size = 6 / self.transform().m11()
+        for x in (rect.left(), rect.center().x(), rect.right()):
+            for y in (rect.top(), rect.center().y(), rect.bottom()):
+                if x != rect.center().x() or y != rect.center().y():
+                    path.addRect(QRectF(x - size / 2, y - size / 2, size, size))
+        pen = QPen(QColor('#202020'), 1, Qt.PenStyle.DashLine)
+        pen.setCosmetic(True)
+        self.selection_item = self.scene().addPath(path, pen)
+        self.selection_item.setZValue(2)
+
     def mousePressEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton or not self.page_rect.width():
             return super().mousePressEvent(event)
@@ -302,6 +324,15 @@ class PageView(QGraphicsView):
         if not self.page_rect.contains(point):
             return
         self.setFocus()
+        if self.region_mode and self.area_bbox is not None and self.area_page == self.active_index:
+            rect = self.display_rect(self.area_bbox)
+            margin = 6 / self.transform().m11()
+            if rect.adjusted(-margin, -margin, margin, margin).contains(point):
+                x = -1 if abs(point.x() - rect.left()) <= margin else 1 if abs(point.x() - rect.right()) <= margin else 0
+                y = -1 if abs(point.y() - rect.top()) <= margin else 1 if abs(point.y() - rect.bottom()) <= margin else 0
+                self.area_drag = (QRectF(rect), x, y)
+                self.start_point = point
+                return
         self.start_point = point
         self.anchor_cursor = None
         self.dragging_text = False
@@ -317,9 +348,24 @@ class PageView(QGraphicsView):
     def mouseMoveEvent(self, event):
         if self.start_point is not None and self.region_mode:
             point = self.mapToScene(event.position().toPoint())
-            rect = QRectF(self.start_point, point).normalized().intersected(self.page_rect)
+            if self.area_drag:
+                rect, x, y = self.area_drag
+                rect = QRectF(rect)
+                delta = point - self.start_point
+                if not x and not y:
+                    rect.translate(delta)
+                    rect.moveLeft(min(max(rect.left(), self.page_rect.left()), self.page_rect.right() - rect.width()))
+                    rect.moveTop(min(max(rect.top(), self.page_rect.top()), self.page_rect.bottom() - rect.height()))
+                else:
+                    if x == -1: rect.setLeft(min(rect.right() - 6, max(self.page_rect.left(), rect.left() + delta.x())))
+                    if x == 1: rect.setRight(max(rect.left() + 6, min(self.page_rect.right(), rect.right() + delta.x())))
+                    if y == -1: rect.setTop(min(rect.bottom() - 6, max(self.page_rect.top(), rect.top() + delta.y())))
+                    if y == 1: rect.setBottom(max(rect.top() + 6, min(self.page_rect.bottom(), rect.bottom() + delta.y())))
+            else:
+                rect = QRectF(self.start_point, point).normalized().intersected(self.page_rect)
             bbox = pymupdf.Rect(rect.x() - self.page_rect.x(), rect.y() - self.page_rect.y(), rect.right() - self.page_rect.x(), rect.bottom() - self.page_rect.y()) * self.derotation
-            self.highlight(tuple(bbox))
+            if self.area_drag: self.highlight_area(tuple(bbox))
+            else: self.highlight(tuple(bbox))
         elif self.start_point is not None and self.anchor_cursor is not None:
             point = self.mapToScene(event.position().toPoint())
             if self.dragging_text or (point - self.start_point).manhattanLength() * self.transform().m11() >= QApplication.startDragDistance():
@@ -334,6 +380,11 @@ class PageView(QGraphicsView):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self.start_point is not None:
             point = self.mapToScene(event.position().toPoint())
+            if self.area_drag:
+                self.area_drag = None
+                self.start_point = None
+                self.area_changed.emit(self.area_bbox)
+                return
             if not self.region_mode:
                 if self.dragging_text:
                     self.text_range.emit(self._drag_characters(point))
@@ -630,7 +681,7 @@ class Editor(QMainWindow):
         self.region_button = self._tool_button('Pridať textové pole', 'text', None, bar)
         self.region_button.setCheckable(True)
         self.region_button.toggled.connect(self._region_toggled)
-        self.cover_button = self._tool_button('Zakryť oblasť', 'cover', None, bar)
+        self.cover_button = self._tool_button('Vybrať oblasť', 'cover', None, bar)
         self.cover_button.setCheckable(True)
         self.cover_button.toggled.connect(self._cover_toggled)
         self._toolbar_separator(bar)
@@ -658,6 +709,7 @@ class Editor(QMainWindow):
         self.view.horizontalScrollBar().valueChanged.connect(lambda: self.view.raster_timer.start())
         self.view.selected.connect(self.select_text)
         self.view.region.connect(self.select_region)
+        self.view.area_changed.connect(self.transform_area)
         self.view.text_range.connect(self.select_range)
         self.view.delete_requested.connect(self.delete_selection)
         self.view.selection_cleared.connect(self.cancel_selection)
@@ -795,6 +847,7 @@ class Editor(QMainWindow):
         layout.addWidget(self.empty, 1)
         self.splitter.hide()
         self.setCentralWidget(root)
+        self.statusBar().addPermanentWidget(QLabel(f'v{VERSION}'))
         self.statusBar().showMessage('Pripravené. Spracovanie prebieha lokálne bez nahrávania súborov.')
         for keys, callback in [('Ctrl+O', self.open_file), ('Ctrl+Shift+S', self.save_copy), ('Ctrl+Z', self.undo), ('Ctrl+Y', self.redo), ('Ctrl+Shift+Z', self.redo), ('Esc', self.cancel_selection)]:
             action = QAction(self)
@@ -889,10 +942,11 @@ class Editor(QMainWindow):
             painter.drawLine(11, 12, 17, 12)
             painter.drawLine(11, 16, 17, 16)
         else:
-            painter.drawRect(QRectF(3, 3, 18, 18))
             if symbol == 'cover':
-                painter.fillRect(QRectF(6, 7, 12, 10), QColor('#607d8b'))
+                painter.setPen(QPen(QColor('#344b58'), 2, Qt.PenStyle.DashLine))
+                painter.drawRect(QRectF(3, 3, 18, 18))
             else:
+                painter.drawRect(QRectF(3, 3, 18, 18))
                 painter.drawLine(7, 7, 17, 7)
                 painter.drawLine(12, 7, 12, 18)
                 painter.drawLine(9, 18, 15, 18)
@@ -925,16 +979,17 @@ class Editor(QMainWindow):
 
     def _update_actions(self):
         ready = self.pdf is not None and not self._busy()
-        editable = ready and self.selection is not None and 'characters' not in self.selection
+        has_pages = ready and self.pdf.page_count > 0
+        editable = ready and self.selection is not None and 'characters' not in self.selection and self.selection.get('kind') != 'area'
         self.open_button.setEnabled(not self._busy())
         for widget in (self.save_button, self.region_button, self.cover_button, self.minus_button, self.fit_button, self.plus_button, self.view):
-            widget.setEnabled(ready)
+            widget.setEnabled(has_pages)
         self.undo_button.setEnabled(ready and self.pdf.can_undo)
         self.redo_button.setEnabled(ready and self.pdf.can_redo)
         self.pages_button.setEnabled(ready)
-        self.duplicate_page_action.setEnabled(ready)
+        self.duplicate_page_action.setEnabled(has_pages)
         self.insert_pdf_action.setEnabled(ready)
-        self.delete_page_action.setEnabled(ready and self.pdf.page_count > 1)
+        self.delete_page_action.setEnabled(has_pages)
         for index in range(self.thumbnails.count()):
             item = self.thumbnails.item(index)
             controls = self.thumbnails.itemWidget(item)
@@ -942,7 +997,7 @@ class Editor(QMainWindow):
                 controls.setEnabled(ready)
             else:
                 controls.findChild(QToolButton, 'duplicatePage').setEnabled(ready)
-                controls.findChild(QToolButton, 'deletePage').setEnabled(ready and self.pdf.page_count > 1)
+                controls.findChild(QToolButton, 'deletePage').setEnabled(has_pages)
         self.text.setEnabled(ready and self.selection is not None)
         self.text.setReadOnly(not editable)
         self.cancel_button.setEnabled(ready and self.selection is not None)
@@ -1009,6 +1064,11 @@ class Editor(QMainWindow):
 
     def render_page(self, fit=False, *, scroll=False, refresh_thumbnails=True):
         if not self.pdf:
+            return
+        if not self.pdf.page_count:
+            self.view.reset_document()
+            self._refresh_thumbnails()
+            self._update_actions()
             return
         try:
             page = self.pdf.document[self.page_index]
@@ -1100,10 +1160,11 @@ class Editor(QMainWindow):
                 pixmap = self.pdf.render(index, min(120 / rect.width, 160 / rect.height))
                 image = QImage(pixmap.samples, pixmap.width, pixmap.height, pixmap.stride, QImage.Format.Format_RGB888).copy()
                 self.thumbnails.item(index).setIcon(QIcon(QPixmap.fromImage(image)))
-            self.add_pdf_card.button.setFixedSize(pixmap.width, pixmap.height)
-            margin = max(0, (self.add_pdf_card.width() - pixmap.width) // 2)
-            self.add_pdf_card.button.move(margin, margin)
-            self.thumbnails.setCurrentRow(self.page_index)
+            if self.pdf.page_count:
+                self.add_pdf_card.button.setFixedSize(pixmap.width, pixmap.height)
+                margin = max(0, (self.add_pdf_card.width() - pixmap.width) // 2)
+                self.add_pdf_card.button.move(margin, margin)
+            self.thumbnails.setCurrentRow(self.page_index if self.pdf.page_count else -1)
         finally:
             self.thumbnails.blockSignals(False)
 
@@ -1151,7 +1212,7 @@ class Editor(QMainWindow):
             self.pages_menu.exec(self.thumbnails.viewport().mapToGlobal(point))
 
     def _pages_changed(self, index, *, scroll=True):
-        self.page_index = min(index, self.pdf.page_count - 1)
+        self.page_index = max(0, min(index, self.pdf.page_count - 1))
         self.ocr_areas.clear()
         self.ocr_attempted.clear()
         self.region_button.setChecked(False)
@@ -1160,7 +1221,7 @@ class Editor(QMainWindow):
         self.render_page(fit=self.view.fit_to_width, scroll=scroll)
 
     def delete_page(self):
-        if not self.pdf or self._busy() or self.pdf.page_count <= 1 or not self._discard_pending():
+        if not self.pdf or self._busy() or not self.pdf.page_count or not self._discard_pending():
             return
         try:
             self.pdf.delete_page(self.page_index)
@@ -1171,7 +1232,7 @@ class Editor(QMainWindow):
         self.statusBar().showMessage('Strana bola odstránená. Obnovíte ju pomocou Ctrl+Z.')
 
     def duplicate_page(self):
-        if not self.pdf or self._busy() or not self._discard_pending():
+        if not self.pdf or self._busy() or not self.pdf.page_count or not self._discard_pending():
             return
         try:
             self.pdf.duplicate_page(self.page_index)
@@ -1190,7 +1251,7 @@ class Editor(QMainWindow):
         if not path:
             return
         try:
-            index = self.pdf.page_count - 1 if append else self.page_index
+            index = self.pdf.page_count - 1 if append or not self.pdf.page_count else self.page_index
             self.pdf.insert_pdf(path, index)
         except Exception as exc:
             self._error(exc)
@@ -1234,9 +1295,11 @@ class Editor(QMainWindow):
     def _cover_toggled(self, enabled):
         if enabled:
             self.region_button.setChecked(False)
+        elif self.selection and self.selection.get('kind') == 'area':
+            self.clear_selection()
         self.view.set_region_mode(enabled or self.region_button.isChecked())
         if self.pdf and enabled:
-            self.statusBar().showMessage('Nakreslite obdĺžnik na zakrytie. Farba sa prevezme z okolitého pozadia.')
+            self.statusBar().showMessage('Označte oblasť. Presuňte ju, zmeňte jej veľkosť alebo ju odstráňte klávesom Delete.')
 
     def restore_highlight(self):
         if self.selection is None:
@@ -1247,7 +1310,10 @@ class Editor(QMainWindow):
         offset = self.view.page_rects[index].topLeft()
         transform = QTransform(matrix.a, matrix.b, matrix.c, matrix.d,
                                matrix.e + offset.x(), matrix.f + offset.y())
-        if 'characters' in self.selection:
+        if self.selection.get('kind') == 'area':
+            self.view.area_page = index
+            self.view.highlight_area(self.selection['bbox'], transform)
+        elif 'characters' in self.selection:
             self.view.highlight_characters(self.selection['characters'], transform)
         else:
             self.view.highlight(self.selection['bbox'], transform)
@@ -1334,23 +1400,43 @@ class Editor(QMainWindow):
             if not self._discard_pending():
                 self.restore_highlight()
                 return
-            try:
-                self.pdf.cover_region(self.page_index, bbox)
-            except Exception as exc:
-                self.restore_highlight()
-                self._error(exc)
-                return
-            rect = pymupdf.Rect(bbox)
-            self.ocr_areas[self.page_index] = [s for s in self.ocr_areas.get(self.page_index, []) if not rect.intersects(pymupdf.Rect(s['bbox']))]
-            self.clear_selection()
-            self.render_page()
-            self.statusBar().showMessage('Oblasť je zakrytá farbou pozadia. Zmenu môžete vrátiť tlačidlom Späť.')
+            self.selection = {'kind': 'area', 'bbox': bbox, 'page_index': self.page_index}
+            self.pending = False
+            self.edit_applied = False
+            self.text.blockSignals(True)
+            self.text.clear()
+            self.text.blockSignals(False)
+            self.selection_preview.hide()
+            self.edit_error.hide()
+            self.hint.setText('Oblasť presuňte, zmeňte jej veľkosť alebo ju odstráňte klávesom Delete.')
+            self.restore_highlight()
+            self._update_actions()
+            self.view.setFocus()
             return
         self.select_text({'text': '', 'bbox': bbox, 'size': min(11, max(4, pymupdf.Rect(bbox).height * 0.65)), 'color': 0, 'insert_only': True})
         if self.selection and self.selection['bbox'] == bbox:
             self.hint.setText('Zadajte text do nového poľa. Náhľad sa aktualizuje automaticky.')
             self._update_actions()
             self.text.setFocus()
+
+    def transform_area(self, bbox):
+        if not self.selection or self.selection.get('kind') != 'area':
+            return
+        original = self.selection['bbox']
+        if pymupdf.Rect(original) == pymupdf.Rect(bbox):
+            return
+        index = self.selection['page_index']
+        try:
+            self.pdf.cover_region(index, original, bbox)
+        except Exception as exc:
+            self.restore_highlight()
+            self._error(exc)
+            return
+        affected = pymupdf.Rect(original) | pymupdf.Rect(bbox)
+        self.ocr_areas[index] = [s for s in self.ocr_areas.get(index, []) if not affected.intersects(pymupdf.Rect(s['bbox']))]
+        self.selection['bbox'] = bbox
+        self.render_page()
+        self.statusBar().showMessage('Oblasť bola upravená. Zmenu môžete vrátiť tlačidlom Späť.')
 
     def cancel_selection(self, checked=False):
         if self.pending:
@@ -1365,6 +1451,9 @@ class Editor(QMainWindow):
         self.view.start_point = None
         self.view.anchor_cursor = None
         self.view.dragging_text = False
+        self.view.area_bbox = None
+        self.view.area_page = None
+        self.view.area_drag = None
         self.selection = None
         self.selection_preview.hide()
         self.pending = False
@@ -1403,7 +1492,9 @@ class Editor(QMainWindow):
         self.auto_apply_timer.stop()
         index = self.selection['page_index']
         try:
-            if 'characters' in self.selection:
+            if self.selection.get('kind') == 'area':
+                self.pdf.cover_region(index, self.selection['bbox'])
+            elif 'characters' in self.selection:
                 self.pdf.delete_characters(index, self.selection['characters'])
             elif self.selection.get('insert_only') and not self.edit_applied:
                 self.clear_selection()
@@ -1441,6 +1532,9 @@ class Editor(QMainWindow):
 
     def save_copy(self):
         if not self.pdf or self._busy():
+            return False
+        if not self.pdf.page_count:
+            self._error(ValueError('The document has no pages.'))
             return False
         if self.pending and not self.apply_change():
             return False

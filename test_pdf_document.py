@@ -91,8 +91,11 @@ class PdfDocumentTests(unittest.TestCase):
         self.assertTrue(self.pdf.undo())
         self.assertEqual(self.pdf.page_count, 2)
         self.pdf.delete_page(0)
+        self.pdf.delete_page(0)
+        self.assertEqual(self.pdf.page_count, 0)
         with self.assertRaises(ValueError):
-            self.pdf.delete_page(0)
+            self.pdf.save_copy(self.root / 'empty.pdf')
+        self.assertTrue(self.pdf.undo())
         self.assertEqual(self.pdf.page_count, 1)
 
     def test_insert_rejects_non_pdf_and_encrypted_pdf(self):
@@ -111,6 +114,24 @@ class PdfDocumentTests(unittest.TestCase):
         self.assertEqual(self.pdf.page_count, 2)
         self.assertFalse(self.pdf.dirty)
         self.assertFalse(self.pdf.can_undo)
+
+    def test_empty_document_history_preserves_metadata_and_failed_insert(self):
+        self.pdf.document.set_metadata({'title': 'Kept title'})
+        self.pdf.delete_page(1)
+        self.pdf.delete_page(0)
+        with patch.object(pymupdf.Document, 'insert_pdf', side_effect=RuntimeError('failure')):
+            with self.assertRaises(RuntimeError):
+                self.pdf.insert_pdf(self.source, -1)
+        self.assertEqual(self.pdf.page_count, 0)
+        self.assertEqual(self.pdf.document.metadata['title'], 'Kept title')
+        self.pdf.insert_pdf(self.source, -1)
+        self.assertEqual(self.pdf.page_count, 2)
+        self.assertTrue(self.pdf.undo())
+        self.assertEqual(self.pdf.page_count, 0)
+        self.assertEqual(self.pdf.document.metadata['title'], 'Kept title')
+        self.assertTrue(self.pdf.redo())
+        self.assertEqual(self.pdf.page_count, 2)
+        self.assertEqual(self.pdf.document.metadata['title'], 'Kept title')
 
     def test_replace_save_and_undo(self):
         self.pdf.replace_text(0, (25, 40, 180, 75), 'Žltý kôň', fontsize=12)

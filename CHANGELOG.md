@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Allow removing the last page and adding a PDF to an empty document, with undo and redo.
+- Replace the cover tool with a selectable, movable and resizable area.
+- Preserve hidden PDF layers in previews and show the application version in the status bar.
+
 ## 0.1.0
 
 - First public Windows release of Omni PDF.

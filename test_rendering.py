@@ -8,6 +8,27 @@ from pdf_document import PdfDocument
 
 
 class RenderingTests(unittest.TestCase):
+    def test_hidden_layer_stays_hidden_with_empty_signature(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'hidden-layer.pdf'
+            with pymupdf.open() as source:
+                page = source.new_page(width=300, height=300)
+                hidden = source.add_ocg('Hidden', on=False)
+                page.insert_text((30, 100), 'Opis', fontsize=40, oc=hidden)
+                signature = pymupdf.Widget()
+                signature.field_name = 'signature'
+                signature.field_type = pymupdf.PDF_WIDGET_TYPE_SIGNATURE
+                signature.rect = pymupdf.Rect(20, 150, 120, 190)
+                page.add_widget(signature)
+                source.save(path)
+            document = PdfDocument(path)
+            try:
+                self.assertEqual(set(document.render(0, 1).samples), {255})
+                self.assertFalse(document.document.get_ocgs()[hidden]['on'])
+                self.assertFalse(document.dirty)
+            finally:
+                document.close()
+
     def test_empty_signature_hidden_only_in_preview(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'widgets.pdf'

@@ -58,16 +58,31 @@ class PdfDocument:
     def can_redo(self):
         return bool(self._redo)
 
-    def _change_pages(self, page_index, operation):
-        if not isinstance(page_index, int) or not 0 <= page_index < self.page_count:
+    def _snapshot(self):
+        if self.page_count:
+            return self.document.tobytes()
+        self.document.new_page()
+        try:
+            return b'empty-pdf:' + self.document.tobytes()
+        finally:
+            self.document.delete_page(0)
+
+    def _restore(self, data):
+        empty = data.startswith(b'empty-pdf:')
+        self.document.close()
+        self.document = pymupdf.open('pdf', data[10:] if empty else data)
+        if empty:
+            self.document.delete_page(0)
+
+    def _change_pages(self, page_index, operation, *, allow_empty=False):
+        if not isinstance(page_index, int) or not (0 <= page_index < self.page_count or allow_empty and self.page_count == 0 and page_index == -1):
             raise ValueError('Select a valid page.')
-        before = self.document.tobytes()
+        before = self._snapshot()
         revision = self._revision
         try:
             operation()
         except Exception:
-            self.document.close()
-            self.document = pymupdf.open('pdf', before)
+            self._restore(before)
             raise
         self._undo.append((before, revision))
         self._redo.clear()
@@ -75,8 +90,6 @@ class PdfDocument:
         self._last_replace = None
 
     def delete_page(self, page_index):
-        if self.page_count == 1:
-            raise ValueError('The last page cannot be deleted.')
         self._change_pages(page_index, lambda: self.document.delete_page(page_index))
 
     def duplicate_page(self, page_index):
@@ -93,7 +106,7 @@ class PdfDocument:
         source = PdfDocument(path)
         try:
             self._change_pages(after_page_index, lambda: self.document.insert_pdf(
-                source.document, start_at=after_page_index + 1, annots=True, widgets=True))
+                source.document, start_at=after_page_index + 1, annots=True, widgets=True), allow_empty=True)
         finally:
             source.close()
 
@@ -165,19 +178,22 @@ class PdfDocument:
         matrix = pymupdf.Matrix(scale, scale)
         if not any(w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE and not w.field_value for w in (page.widgets() or ())):
             return page.get_pixmap(matrix=matrix, clip=clip, alpha=False)
-        with pymupdf.open() as preview:
-            preview.insert_pdf(self.document, from_page=page_index, to_page=page_index, annots=True, widgets=True)
-            page = preview[0]
+        with pymupdf.open('pdf', self.document.tobytes()) as preview:
+            page = preview[page_index]
             for widget in list(page.widgets() or ()):
                 if widget.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE and not widget.field_value:
                     page.delete_widget(widget)
             return page.get_pixmap(matrix=matrix, clip=clip, alpha=False)
 
-    def cover_region(self, page_index, bbox):
+    def cover_region(self, page_index, bbox, destination=None):
         page = self.document[page_index]
         rect = pymupdf.Rect(bbox)
         if rect.is_empty or rect.is_infinite or not (page.rect * page.derotation_matrix).contains(rect):
             raise ValueError('Select a valid area inside the page.')
+        if destination is not None:
+            target = pymupdf.Rect(destination)
+            if target.is_empty or target.is_infinite or not (page.rect * page.derotation_matrix).contains(target):
+                raise ValueError('Select a valid area inside the page.')
         if any(annot.type[0] == pymupdf.PDF_ANNOT_REDACT for annot in (page.annots() or ())):
             raise ValueError('Strana obsahuje existujúce redakcie. Pred úpravou ich odstráňte alebo použite inú kópiu.')
         scale = 1.5
@@ -201,6 +217,11 @@ class PdfDocument:
         try:
             page.add_redact_annot(rect, fill=color)
             page.apply_redactions(images=2, graphics=0, text=0)
+            if destination is not None:
+                with pymupdf.open('pdf', before) as source:
+                    source[page_index].set_rotation(0)
+                    image = source[page_index].get_pixmap(matrix=pymupdf.Matrix(3, 3), clip=rect, alpha=False, annots=False)
+                    page.insert_image(target, stream=image.tobytes('png'), keep_proportion=False, overlay=True)
         except Exception:
             self.document.close()
             self.document = pymupdf.open('pdf', before)
@@ -292,24 +313,24 @@ class PdfDocument:
     def undo(self):
         if not self._undo:
             return False
-        self._redo.append((self.document.tobytes(), self._revision))
+        self._redo.append((self._snapshot(), self._revision))
         self._last_replace = None
         data, self._revision = self._undo.pop()
-        self.document.close()
-        self.document = pymupdf.open('pdf', data)
+        self._restore(data)
         return True
 
     def redo(self):
         if not self._redo:
             return False
-        self._undo.append((self.document.tobytes(), self._revision))
+        self._undo.append((self._snapshot(), self._revision))
         self._last_replace = None
         data, self._revision = self._redo.pop()
-        self.document.close()
-        self.document = pymupdf.open('pdf', data)
+        self._restore(data)
         return True
 
     def save_copy(self, path):
+        if not self.page_count:
+            raise ValueError('The document has no pages.')
         target = Path(path).resolve()
         if target == self.source or (target.exists() and os.path.samefile(target, self.source)):
             raise ValueError('The original file cannot be overwritten.')

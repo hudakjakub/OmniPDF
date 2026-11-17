@@ -133,7 +133,7 @@ class ThumbnailTests(unittest.TestCase):
                 window.delete_page()
                 window.delete_page()
                 controls = window.thumbnails.itemWidget(window.thumbnails.item(0))
-                self.assertFalse(controls.findChild(QToolButton, 'deletePage').isEnabled())
+                self.assertTrue(controls.findChild(QToolButton, 'deletePage').isEnabled())
                 self.assertTrue(controls.findChild(QToolButton, 'duplicatePage').isEnabled())
                 self.assertEqual(original, source.read_bytes())
                 window.pdf.close()
