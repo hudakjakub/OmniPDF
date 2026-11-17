@@ -22,7 +22,7 @@ class DragDropTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.source = self.root / 'source.pdf'
         self.target = self.root / 'faktúra 2.PDF'
         with pymupdf.open() as doc:

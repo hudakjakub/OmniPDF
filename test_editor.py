@@ -25,7 +25,7 @@ class EditorTests(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.source = self.root / 'invoice.pdf'
         with pymupdf.open() as doc:
             page = doc.new_page(width=500, height=700)

@@ -1,10 +1,13 @@
 """Check and securely download published Omni PDF updates."""
 import hashlib
+import ctypes
 import json
+import ntpath
 import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
@@ -205,9 +208,28 @@ def verify_installer(path, release):
 
 
 def launch_installer(path, installation_dir, parent_pid):
+    env = {**os.environ, 'PYINSTALLER_RESET_ENVIRONMENT': '1'}
+    kernel = None
     try:
+        if sys.platform == 'win32' and getattr(sys, 'frozen', False):
+            meipass = sys._MEIPASS
+            root = ntpath.normcase(ntpath.abspath(meipass))
+            def outside_bundle(entry):
+                try:
+                    return ntpath.commonpath((root, ntpath.normcase(ntpath.abspath(entry)))) != root
+                except ValueError:
+                    return True
+            env['PATH'] = ';'.join(entry for entry in env.get('PATH', '').split(';') if outside_bundle(entry))
+            api = ctypes.windll.kernel32
+            reset = api.SetDllDirectoryW
+            kernel = api
+            if not reset(None):
+                raise UpdateError("Could not prepare the installer environment.")
         return subprocess.Popen([str(path), "/SILENT", "/NORESTART", "/SP-", "/OMNIPDFUPDATE=1", f"/OMNIPDFWAITPID={parent_pid}", f"/DIR={installation_dir}"],
-                                env={**os.environ, 'PYINSTALLER_RESET_ENVIRONMENT': '1'},
+                                env=env,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except OSError as exc:
+    except (OSError, AttributeError) as exc:
         raise UpdateError("Could not start the installer.") from exc
+    finally:
+        if kernel is not None:
+            kernel.SetDllDirectoryW(sys._MEIPASS)

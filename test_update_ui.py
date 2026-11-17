@@ -89,6 +89,7 @@ class UpdateUiTests(unittest.TestCase):
              patch.object(QFileDialog, 'getSaveFileName', return_value=(str(output), 'PDF')), \
              patch('main.updates.launch_installer') as launch:
             self.window._offer_update()
+            self.wait_for_worker()
             launch.assert_called_once()
         with pymupdf.open(output) as saved:
             self.assertIn('Changed text', saved[0].get_text())
@@ -100,10 +101,44 @@ class UpdateUiTests(unittest.TestCase):
         with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
              patch.object(QMessageBox, 'warning') as warning, patch('main.updates.launch_installer') as launch:
             self.window._offer_update()
+            self.wait_for_worker()
             launch.assert_not_called()
             warning.assert_called_once()
         self.assertIsNone(self.window.ready_update)
         self.assertTrue(self.window.isVisible())
+
+    def test_discarded_draft_does_not_block_update_after_verification(self):
+        source = self.root / 'draft.pdf'
+        with pymupdf.open() as document:
+            document.new_page().insert_text((50, 80), 'Original text', fontsize=12)
+            document.save(source)
+        original = source.read_bytes()
+        self.window.open_file(path=source)
+        self.window.select_text(self.window.pdf.spans(0)[0])
+        self.window.text.setPlainText('Draft text')
+        self.window.ready_update = (self.release, self.installer)
+        with patch.object(QMessageBox, 'question', side_effect=[QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Discard]), \
+             patch('main.updates.launch_installer') as launch:
+            self.window._offer_update()
+            self.wait_for_worker()
+            launch.assert_called_once()
+        self.assertEqual(source.read_bytes(), original)
+
+    def test_queued_ocr_is_deferred_during_update_prompt(self):
+        source = self.root / 'source.pdf'
+        with pymupdf.open() as document:
+            document.new_page().insert_text((50, 80), 'Original text', fontsize=12)
+            document.save(source)
+        self.window.open_file(path=source)
+        self.window.ready_update = (self.release, self.installer)
+        def answer(*args):
+            self.window._auto_ocr(self.window.pdf, self.window.page_index)
+            return QMessageBox.StandardButton.No
+        with patch.object(self.window, 'start_ocr') as ocr, patch.object(QMessageBox, 'question', side_effect=answer):
+            self.window._offer_update()
+            ocr.assert_not_called()
+        self.assertFalse(self.window._close_approved)
+        self.assertFalse(self.window._install_pending)
 
     def test_close_during_check_cancels_without_destroying_running_thread(self):
         gate = threading.Event()
@@ -124,6 +159,36 @@ class UpdateUiTests(unittest.TestCase):
                 self.wait_for_worker()
             message.assert_not_called()
         self.assertFalse(self.window.isVisible())
+
+    def test_cancel_close_during_verification_also_cancels_installation(self):
+        source = self.root / 'draft.pdf'
+        with pymupdf.open() as document:
+            document.new_page().insert_text((50, 80), 'Original text', fontsize=12)
+            document.save(source)
+        self.window.open_file(path=source)
+        self.window.select_text(self.window.pdf.spans(0)[0])
+        self.window.text.setPlainText('Draft text')
+        self.window.auto_apply_timer.stop()
+        self.window.ready_update = (self.release, self.installer)
+        gate = threading.Event()
+        started = threading.Event()
+        def verify(*args):
+            started.set()
+            gate.wait(2)
+        answers = [QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Discard, QMessageBox.StandardButton.Cancel]
+        with patch('main.updates.verify_installer', side_effect=verify), \
+             patch('main.updates.launch_installer') as launch, patch.object(QMessageBox, 'question', side_effect=answers):
+            self.window._offer_update()
+            try:
+                self.assertTrue(started.wait(1))
+                self.window.close()
+                self.assertTrue(self.window.isVisible())
+            finally:
+                gate.set()
+                self.wait_for_worker()
+            launch.assert_not_called()
+        self.assertFalse(self.window._close_approved)
+        self.assertTrue(self.window.pending)
 
     def test_automatic_update_setting_can_disable_background_requests(self):
         self.window.auto_update_action.setChecked(False)

@@ -83,6 +83,21 @@ class UpdateTests(unittest.TestCase):
         with patch.object(updates.subprocess, "Popen") as popen:
             updates.launch_installer("C:/temp/setup.exe", "C:/Program Files/Omni PDF", 42)
         self.assertEqual(popen.call_args.args[0], ["C:/temp/setup.exe", "/SILENT", "/NORESTART", "/SP-", "/OMNIPDFUPDATE=1", "/OMNIPDFWAITPID=42", "/DIR=C:/Program Files/Omni PDF"])
+
+    def test_frozen_windows_launch_sanitizes_dll_search(self):
+        from unittest.mock import Mock, call
+        kernel = Mock()
+        kernel.SetDllDirectoryW.return_value = True
+        with patch.object(updates.sys, 'platform', 'win32'), \
+             patch.object(updates.sys, 'frozen', True, create=True), \
+             patch.object(updates.sys, '_MEIPASS', r'C:\Temp\bundle', create=True), \
+             patch.object(updates.ctypes, 'windll', Mock(kernel32=kernel), create=True), \
+             patch.dict(updates.os.environ, {'PATH': r'C:\Temp\bundle;C:\Temp\bundle\lib;C:\Windows'}, clear=True), \
+             patch.object(updates.subprocess, 'Popen') as popen:
+            updates.launch_installer('setup.exe', 'app', 42)
+        self.assertEqual(kernel.SetDllDirectoryW.call_args_list, [call(None), call(r'C:\Temp\bundle')])
+        self.assertEqual(popen.call_args.kwargs['env']['PATH'], r'C:\Windows')
+        self.assertEqual(popen.call_args.kwargs['env']['PYINSTALLER_RESET_ENVIRONMENT'], '1')
         self.assertEqual(popen.call_args.kwargs['env']['PYINSTALLER_RESET_ENVIRONMENT'], '1')
 
     def test_cancellation_cleans_temporary_file(self):

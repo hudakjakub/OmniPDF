@@ -381,11 +381,18 @@ class UpdateWorker(QThread):
     failed = Signal(str)
     downloading = Signal()
 
-    def __init__(self, parent):
+    def __init__(self, parent, verification=None):
         super().__init__(parent)
+        self.verification = verification
 
     def run(self):
         try:
+            if self.verification is not None:
+                release, installer = self.verification
+                updates.verify_installer(installer, release)
+                if not self.isInterruptionRequested():
+                    self.completed.emit(self.verification)
+                return
             release = updates.check_for_update()
             if self.isInterruptionRequested():
                 return
@@ -457,6 +464,10 @@ class Editor(QMainWindow):
         self.edit_applied = False
         self.update_worker = None
         self.ready_update = None
+        self._install_pending = False
+        self._verified_update = None
+        self._skip_update_offer = False
+        self._install_directory = None
         self._update_manual = False
         self._closing_after_update = False
         self._close_approved = False
@@ -1455,6 +1466,9 @@ class Editor(QMainWindow):
     def _auto_ocr(self, document, index):
         if self._closing_after_update:
             return
+        if self._install_pending and self.pdf is document:
+            QTimer.singleShot(500, lambda: self._auto_ocr(document, index))
+            return
         if self.pdf is document and self.page_index == index and not self._busy():
             self.start_ocr()
         elif self.pdf is document:
@@ -1536,7 +1550,10 @@ class Editor(QMainWindow):
         self._update_manual = not automatic
         self.check_updates_action.setEnabled(False)
         self.check_updates_action.setText('Kontrolujú sa aktualizácie…')
-        self.update_worker = UpdateWorker(self)
+        self._start_update_worker()
+
+    def _start_update_worker(self, verification=None):
+        self.update_worker = UpdateWorker(self, verification)
         self.update_worker.completed.connect(self._update_completed)
         self.update_worker.failed.connect(self._update_failed)
         self.update_worker.downloading.connect(lambda: self.check_updates_action.setText('Sťahuje sa aktualizácia…'))
@@ -1545,6 +1562,9 @@ class Editor(QMainWindow):
 
     def _update_completed(self, result):
         if self._closing_after_update:
+            return
+        if self._install_pending:
+            self._verified_update = result
             return
         release, installer = result
         if release is None:
@@ -1562,7 +1582,9 @@ class Editor(QMainWindow):
         self.statusBar().showMessage(f'Aktualizácia {release.version} je pripravená na inštaláciu.')
 
     def _update_failed(self, message):
-        if not self._closing_after_update and self._update_manual:
+        if self._install_pending:
+            self.ready_update = None
+        if not self._closing_after_update and (self._update_manual or self._install_pending):
             QMessageBox.warning(self, 'Aktualizácie', 'Aktualizáciu sa nepodarilo overiť alebo stiahnuť. '
                                 'Skontrolujte pripojenie a skúste to znova.')
 
@@ -1570,38 +1592,67 @@ class Editor(QMainWindow):
         worker = self.update_worker
         self.update_worker = None
         worker.deleteLater()
+        skip_offer = self._skip_update_offer
+        self._skip_update_offer = False
+        self.centralWidget().setEnabled(True)
         self.check_updates_action.setEnabled(True)
         self.check_updates_action.setText('Nainštalovať aktualizáciu…' if self.ready_update else 'Skontrolovať aktualizácie…')
         if self._closing_after_update:
             self.close()
-        elif self.ready_update is not None:
+        elif self._install_pending:
+            if self._verified_update is not None:
+                self._launch_update()
+            self._install_pending = False
+            self._verified_update = None
+        elif self.ready_update is not None and not skip_offer:
             self._offer_update()
 
     def _offer_update(self):
+        if self._busy() or self._install_pending:
+            return
+        self._install_pending = True
+        release, installer = self.ready_update
+        executable_dir = Path(sys.executable).resolve().parent
+        local = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local')))
+        installed = (executable_dir / 'unins000.exe').is_file()
+        self._install_directory = executable_dir if installed else local / 'Programs' / 'OmniPDF'
+        message = (f'Nainštalovať Omni PDF {release.version} a reštartovať aplikáciu? '
+                   'Pred reštartom budete môcť uložiť rozpracované PDF.')
+        if not installed:
+            message += (f'\n\nPrenosná aplikácia sa nainštaluje do:\n{self._install_directory}\n'
+                        'Existujúca inštalácia v tomto priečinku sa aktualizuje. Pôvodný prenosný EXE zostane zachovaný.')
+        answer = QMessageBox.question(self, 'Aktualizácia je pripravená',
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes or self._busy() or not self._leave_document():
+            self._install_pending = False
+            return
+        self.centralWidget().setEnabled(False)
+        self.check_updates_action.setEnabled(False)
+        self.check_updates_action.setText('Overuje sa inštalátor…')
+        self._start_update_worker(verification=self.ready_update)
+
+    def _launch_update(self):
         if self._busy():
             return
-        release, installer = self.ready_update
-        answer = QMessageBox.question(self, 'Aktualizácia je pripravená',
-            f'Nainštalovať Omni PDF {release.version} a reštartovať aplikáciu? '
-            'Pred reštartom budete môcť uložiť rozpracované PDF.',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-        if answer != QMessageBox.StandardButton.Yes or not self._leave_document():
-            return
+        release, installer = self._verified_update
         try:
-            updates.verify_installer(installer, release)
-            executable_dir = Path(sys.executable).resolve().parent
-            local = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local')))
-            installation_dir = executable_dir if (executable_dir / 'unins000.exe').is_file() else local / 'Programs' / 'OmniPDF'
-            updates.launch_installer(installer, installation_dir, os.getpid())
+            updates.launch_installer(installer, self._install_directory, os.getpid())
         except updates.UpdateError:
             self.ready_update = None
             self.check_updates_action.setText('Skontrolovať aktualizácie…')
             QMessageBox.warning(self, 'Aktualizácia', 'Inštalátor sa nepodarilo bezpečne spustiť. Skúste aktualizáciu znova.')
             return
         self._close_approved = True
-        self.close()
+        if not self.close():
+            self._close_approved = False
 
     def closeEvent(self, event):
+        if self._install_pending and self.update_worker is not None:
+            self.update_worker.requestInterruption()
+            self._install_pending = False
+            self._verified_update = None
+            self._skip_update_offer = True
         if self._busy():
             QMessageBox.information(self, 'Rozpoznávanie textu', 'Počkajte na dokončenie rozpoznávania textu.')
             event.ignore()
