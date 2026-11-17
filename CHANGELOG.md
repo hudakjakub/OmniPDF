@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.10
+
+- Print documents with Ctrl+P and the system print dialog.
+
 ## 0.1.9
 
 - Ask before downloading updates, show cancellable download progress and restart after installation.

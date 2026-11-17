@@ -391,7 +391,7 @@ class EditorTests(unittest.TestCase):
 
     def test_classic_toolbar_actions_and_zoom(self):
         window = self.window
-        buttons = (window.open_button, window.save_button, window.undo_button,
+        buttons = (window.open_button, window.save_button, window.print_button, window.undo_button,
                    window.redo_button, window.previous_button, window.next_button,
                    window.region_button, window.cover_button, window.minus_button,
                    window.plus_button, window.fit_button, window.pages_button)

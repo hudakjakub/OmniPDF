@@ -10,8 +10,9 @@ from pathlib import Path
 import pymupdf
 from PySide6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QTransform
+from PySide6.QtPrintSupport import QAbstractPrintDialog, QPrintDialog, QPrinter
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFileDialog, QFrame,
+    QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame,
     QGraphicsDropShadowEffect, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
     QMenu, QMessageBox, QProgressDialog, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStyledItemDelegate,
     QStyle, QStyleOptionViewItem, QTextEdit, QToolButton, QVBoxLayout, QWidget,
@@ -719,6 +720,7 @@ class Editor(QMainWindow):
         row.addWidget(self.file_label, 1)
         self.open_button = self._tool_button(_('Otvoriť súbor (Ctrl+O)'), 'open', self.open_file, row)
         self.save_button = self._tool_button(_('Uložiť kópiu (Ctrl+S alebo Ctrl+Shift+S)'), 'save', self.save_copy, row)
+        self.print_button = self._tool_button(_('Tlačiť (Ctrl+P)'), 'print', self.print_document, row)
         self._toolbar_separator(row)
         self.undo_button = self._tool_button(_('Späť (Ctrl+Z)'), 'undo', self.undo, row)
         self.redo_button = self._tool_button(_('Dopredu (Ctrl+Y)'), 'redo', self.redo, row)
@@ -917,6 +919,7 @@ class Editor(QMainWindow):
         for keys, callback in [
             ('Ctrl+O', self.open_file), ('Ctrl+S', self.save_button.click),
             ('Ctrl+Shift+S', self.save_button.click), ('Ctrl+Z', self.undo),
+            ('Ctrl+P', self.print_button.click),
             ('Ctrl+Y', self.redo), ('Ctrl+Shift+Z', self.redo), ('Esc', self.cancel_selection),
             ('Ctrl++', self.plus_button.click), ('Ctrl+=', self.plus_button.click),
             ('Ctrl+-', self.minus_button.click), ('Ctrl+0', self.fit_button.click),
@@ -1007,6 +1010,11 @@ class Editor(QMainWindow):
             painter.drawPath(path)
             painter.drawRect(QRectF(8, 3, 8, 6))
             painter.drawRect(QRectF(8, 14, 9, 7))
+        elif symbol == 'print':
+            painter.drawRect(QRectF(6, 3, 12, 6))
+            painter.drawRect(QRectF(3, 9, 18, 8))
+            painter.drawRect(QRectF(6, 14, 12, 7))
+            painter.drawLine(16, 11, 18, 11)
         elif symbol == 'pages':
             painter.drawRect(QRectF(4, 3, 12, 15))
             painter.drawRect(QRectF(8, 7, 12, 15))
@@ -1053,7 +1061,7 @@ class Editor(QMainWindow):
         has_pages = ready and self.pdf.page_count > 0
         editable = ready and self.selection is not None and 'characters' not in self.selection and self.selection.get('kind') != 'area'
         self.open_button.setEnabled(not self._busy())
-        for widget in (self.save_button, self.region_button, self.cover_button, self.minus_button, self.fit_button, self.plus_button, self.view):
+        for widget in (self.save_button, self.print_button, self.region_button, self.cover_button, self.minus_button, self.fit_button, self.plus_button, self.view):
             widget.setEnabled(has_pages)
         self.undo_button.setEnabled(ready and self.pdf.can_undo)
         self.redo_button.setEnabled(ready and self.pdf.can_redo)
@@ -1088,6 +1096,63 @@ class Editor(QMainWindow):
 
     def _discard_pending(self):
         return not self.pending or self.apply_change()
+
+    def print_document(self):
+        if not self.pdf or self._busy() or not self.pdf.page_count:
+            return
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setDocName(self.pdf.source.name)
+        dialog = QPrintDialog(printer, self)
+        dialog.setMinMax(1, self.pdf.page_count)
+        dialog.setOption(QAbstractPrintDialog.PrintDialogOption.PrintPageRange, True)
+        dialog.setOption(QAbstractPrintDialog.PrintDialogOption.PrintCurrentPage, True)
+        dialog.setOption(QAbstractPrintDialog.PrintDialogOption.PrintSelection, False)
+        if dialog.exec() != QDialog.DialogCode.Accepted or not self._discard_pending():
+            return
+        painter = QPainter()
+        try:
+            if printer.printRange() == QPrinter.PrintRange.CurrentPage:
+                pages = [self.page_index]
+            elif printer.printRange() == QPrinter.PrintRange.PageRange:
+                ranges = printer.pageRanges()
+                if ranges.isEmpty():
+                    first, last = max(1, printer.fromPage()), min(self.pdf.page_count, printer.toPage() or self.pdf.page_count)
+                    pages = list(range(first - 1, last))
+                else:
+                    pages = [i for i in range(self.pdf.page_count) if ranges.contains(i + 1)]
+            elif printer.printRange() == QPrinter.PrintRange.AllPages:
+                pages = list(range(self.pdf.page_count))
+            else:
+                raise ValueError(_('Vybraný rozsah strán nemožno vytlačiť.'))
+            if not pages:
+                raise ValueError(_('Vybraný rozsah strán nemožno vytlačiť.'))
+            if printer.pageOrder() == QPrinter.PageOrder.LastPageFirst:
+                pages.reverse()
+            if not printer.supportsMultipleCopies():
+                count = max(1, printer.copyCount())
+                pages = pages * count if printer.collateCopies() else [page for page in pages for _copy in range(count)]
+            if not painter.begin(printer):
+                raise RuntimeError(_('Tlačiareň sa nepodarilo spustiť.'))
+            bounds = printer.pageRect(QPrinter.Unit.DevicePixel)
+            for position, index in enumerate(pages):
+                if position and not printer.newPage():
+                    raise RuntimeError(_('Tlač strany zlyhala.'))
+                page = self.pdf.document[index]
+                scale = min(printer.resolution() / 72, 300 / 72, math.sqrt(16_000_000 / page.rect.get_area()))
+                pixmap = self.pdf.render(index, scale)
+                image = QImage(pixmap.samples, pixmap.width, pixmap.height, pixmap.stride, QImage.Format.Format_RGB888).copy()
+                factor = min(bounds.width() / image.width(), bounds.height() / image.height())
+                width, height = image.width() * factor, image.height() * factor
+                painter.drawImage(QRectF((bounds.width() - width) / 2, (bounds.height() - height) / 2, width, height), image)
+            if not painter.end():
+                raise RuntimeError(_('Tlač sa nepodarilo dokončiť.'))
+        except Exception as exc:
+            if painter.isActive():
+                printer.abort()
+                painter.end()
+            self._error(exc)
+            return
+        self.statusBar().showMessage(_('Tlačová úloha bola odoslaná.'))
 
     def _leave_document(self):
         if self._busy():

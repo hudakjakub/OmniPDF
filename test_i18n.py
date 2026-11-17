@@ -20,14 +20,15 @@ class LanguageTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def test_system_languages_and_standard_buttons(self):
-        for language, open_label, save_label in [('sk', 'Otvoriť súbor (Ctrl+O)', 'Uložiť'),
-                                                  ('en', 'Open file (Ctrl+O)', 'Save')]:
+        for language, open_label, save_label, print_label in [('sk', 'Otvoriť súbor (Ctrl+O)', 'Uložiť', 'Tlačiť (Ctrl+P)'),
+                                                               ('en', 'Open file (Ctrl+O)', 'Save', 'Print (Ctrl+P)')]:
             with self.subTest(language=language), patch('i18n.language', return_value=language):
                 configure_language(self.app)
                 window = Editor()
                 box = QMessageBox()
                 box.setStandardButtons(QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel)
                 self.assertEqual(window.open_button.toolTip(), open_label)
+                self.assertEqual(window.print_button.toolTip(), print_label)
                 self.assertEqual(box.button(QMessageBox.StandardButton.Save).text().replace('&', ''), save_label)
                 window.close()
         configure_language(self.app)
