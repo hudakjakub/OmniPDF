@@ -31,6 +31,15 @@ def version_metadata(version):
 '''
 
 
+def build_environment():
+    # Host tools can expose incompatible ICU DLLs; only use Python and Windows paths.
+    windows = Path(os.environ.get('SystemRoot', r'C:\Windows'))
+    environment = dict(os.environ)
+    environment['PATH'] = os.pathsep.join(map(str, (Path(sys.executable).parent,
+        Path(sys.base_prefix), windows / 'System32', windows)))
+    return environment
+
+
 def main():
     validate_version(VERSION, os.environ.get('RELEASE_TAG') or None)
     if sys.argv[1:] == ['--validate']:
@@ -42,6 +51,8 @@ def main():
 
     os.chdir(ROOT)
     iscc = Path(os.environ.get('ISCC', r'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'))
+    if not iscc.is_file() and 'ISCC' not in os.environ:
+        iscc = Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'Inno Setup 7' / 'ISCC.exe'
     if not iscc.is_file():
         raise FileNotFoundError(f'Inno Setup compiler not found: {iscc}')
     build = ROOT / 'build' / 'release-inputs'
@@ -78,7 +89,7 @@ def main():
                     *sum((['--add-data', f'{ROOT / name};{dest}'] for name, dest in
                           [('assets', 'assets'), ('windows_ocr.ps1', '.'), ('LICENSE', '.'), ('THIRD_PARTY_NOTICES.md', '.'),
                            (str(licenses), 'licenses')]), []),
-                    'main.py'], check=True)
+                    'main.py'], check=True, env=build_environment())
     portable = release / f'OmniPDF-{VERSION}-windows-x64.exe'
     shutil.copy2(ROOT / 'dist' / 'OmniPDF.exe', portable)
     subprocess.run([str(iscc), f'/DAppVersion={VERSION}', str(ROOT / 'packaging' / 'installer.iss')], check=True)

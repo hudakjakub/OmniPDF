@@ -31,7 +31,7 @@ Name: "{group}\Omni PDF"; Filename: "{app}\OmniPDF.exe"
 
 [Run]
 Filename: "{app}\OmniPDF.exe"; Description: "Launch Omni PDF"; Flags: nowait postinstall skipifsilent; Check: not IsUpdate
-Filename: "{app}\OmniPDF.exe"; Flags: nowait; Check: IsUpdate
+Filename: "{app}\OmniPDF.exe"; Parameters: "{code:RestartParameters}"; Flags: nowait; Check: IsUpdate
 
 [Code]
 function OpenProcess(dwDesiredAccess: Cardinal; bInheritHandle: Boolean; dwProcessId: Cardinal): THandle;
@@ -46,6 +46,15 @@ function GetLastError: Cardinal;
 function IsUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:OMNIPDFUPDATE|0}') = '1';
+end;
+
+function RestartParameters(Param: String): String;
+var
+  OutputFile: String;
+begin
+  OutputFile := ExpandConstant('{param:OMNIPDFSMOKETESTOUTPUT|}');
+  if OutputFile = '' then Result := ''
+  else Result := '--smoke-test --output ' + AddQuotes(OutputFile);
 end;
 
 function InitializeSetup: Boolean;

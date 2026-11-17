@@ -1,5 +1,6 @@
 import unittest
-from scripts.build_windows import validate_version, version_metadata
+from unittest.mock import patch
+from scripts.build_windows import build_environment, validate_version, version_metadata
 
 
 class BuildTests(unittest.TestCase):
@@ -13,3 +14,7 @@ class BuildTests(unittest.TestCase):
         metadata = version_metadata('1.2.3')
         self.assertIn('filevers=(1, 2, 3, 0)', metadata)
         self.assertIn("StringStruct('ProductVersion', '1.2.3')", metadata)
+
+    def test_build_does_not_bundle_unrelated_host_tool_libraries(self):
+        with patch.dict('os.environ', {'PATH': 'C:/host-tools/poppler/bin'}):
+            self.assertNotIn('poppler', build_environment()['PATH'])
