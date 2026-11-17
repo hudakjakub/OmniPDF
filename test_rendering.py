@@ -8,6 +8,34 @@ from pdf_document import PdfDocument
 
 
 class RenderingTests(unittest.TestCase):
+    def test_signed_widget_remains_visible_next_to_empty_signature(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'signed-widgets.pdf'
+            with pymupdf.open() as source:
+                page = source.new_page(width=300, height=200)
+                for name, rect, color in [('signed', (20, 20, 120, 60), (1, 0, 0)),
+                                          ('empty', (20, 90, 120, 130), (0, 0, 1))]:
+                    widget = pymupdf.Widget()
+                    widget.field_name = name
+                    widget.field_type = pymupdf.PDF_WIDGET_TYPE_SIGNATURE
+                    widget.rect = pymupdf.Rect(rect)
+                    widget.fill_color = color
+                    page.add_widget(widget)
+                signed = next(page.widgets())
+                xref = source.get_new_xref()
+                source.update_object(xref, '<< /Type /Sig /ByteRange [0 1 2 3] /Contents <00> >>')
+                source.xref_set_key(signed.xref, 'V', f'{xref} 0 R')
+                source.save(path)
+            pdf = PdfDocument(path, allow_signed=True)
+            try:
+                original = pdf.document[0].get_pixmap()
+                rendered = pdf.render(0, 1)
+                self.assertNotEqual(original.pixel(21, 21), (255, 255, 255))
+                self.assertEqual(rendered.pixel(21, 21), original.pixel(21, 21))
+                self.assertEqual(rendered.pixel(21, 91), (255, 255, 255))
+            finally:
+                pdf.close()
+
     def test_hidden_layer_stays_hidden_with_empty_signature(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'hidden-layer.pdf'

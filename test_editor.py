@@ -96,6 +96,49 @@ class EditorTests(unittest.TestCase):
             dialog.assert_not_called()
         self.assertEqual(view.transform().m11(), original)
 
+    def test_signed_pdf_requires_confirmation_to_open_or_insert(self):
+        window = self.window
+        path = self.root / 'signed.pdf'
+        with pymupdf.open() as doc:
+            page = doc.new_page()
+            page.insert_text((50, 80), 'Signed content')
+            widget = pymupdf.Widget()
+            widget.field_name = 'Signature'
+            widget.field_type = pymupdf.PDF_WIDGET_TYPE_SIGNATURE
+            widget.rect = pymupdf.Rect(50, 100, 200, 140)
+            page.add_widget(widget)
+            xref = doc.get_new_xref()
+            doc.update_object(xref, '<< /Type /Sig /ByteRange [0 1 2 3] /Contents <00> >>')
+            doc.xref_set_key(next(page.widgets()).xref, 'V', f'{xref} 0 R')
+            doc.save(path)
+        source_bytes = path.read_bytes()
+        with patch.object(QMessageBox, 'question') as question:
+            window.open_file(path=self.source)
+            question.assert_not_called()
+        original = window.pdf
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.No) as question:
+            window.open_file(path=path)
+            self.assertIs(window.pdf, original)
+            self.assertEqual(question.call_count, 1)
+            self.assertEqual(question.call_args.args[-1], QMessageBox.StandardButton.No)
+            window.insert_pdf(path=path)
+            self.assertEqual(window.pdf.page_count, 2)
+            self.assertEqual(question.call_count, 2)
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes) as question:
+            window.insert_pdf(path=path)
+            self.assertEqual(window.pdf.page_count, 3)
+            self.assertEqual(question.call_count, 1)
+            window.undo()
+            window.open_file(path=path)
+            self.assertEqual(window.pdf.source, path.resolve())
+            self.assertIn('Signed content', window.pdf.document[0].get_text())
+            self.assertEqual(question.call_count, 2)
+        self.assertEqual(path.read_bytes(), source_bytes)
+        output = self.root / 'signed-copy.pdf'
+        window.pdf.save_copy(output)
+        self.assertTrue(output.exists())
+        self.assertEqual(path.read_bytes(), source_bytes)
+
     def test_select_edit_save_and_undo(self):
         window = self.window
         self.assertEqual(window.page_label.text(), '1 / 2')

@@ -68,6 +68,18 @@ class LanguageTests(unittest.TestCase):
                         window.pdf = None
                         window.close()
 
+    def test_signed_document_confirmation_in_both_languages(self):
+        for code, title, disclaimer in [('sk', 'Digitálne podpísané PDF', 'neoveruje jeho platnosť'),
+                                         ('en', 'Digitally signed PDF', 'does not verify its validity')]:
+            with self.subTest(language=code), patch('i18n.language', return_value=code):
+                window = Editor()
+                with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.No) as question:
+                    self.assertFalse(window._confirm_signed_pdf())
+                    self.assertEqual(question.call_args.args[1], title)
+                    self.assertIn(disclaimer, question.call_args.args[2])
+                    self.assertEqual(question.call_args.args[-1], QMessageBox.StandardButton.No)
+                window.close()
+
 
 if __name__ == '__main__':
     unittest.main()

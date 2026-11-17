@@ -90,6 +90,8 @@ EN = {
     'PDF je poškodené. Skúste ho znova exportovať.': 'The PDF is damaged. Try exporting it again.',
     'Toto PDF má zakázané úpravy.': 'This PDF does not permit editing.',
     'Digitálne podpísané PDF nie je možné upraviť bez zneplatnenia podpisu.': 'A digitally signed PDF cannot be edited without invalidating its signature.',
+    'Digitálne podpísané PDF': 'Digitally signed PDF',
+    'Tento dokument obsahuje digitálny podpis. Aplikácia neoveruje jeho platnosť. Uložením kópie alebo vložením strán sa podpis zneplatní. Pôvodný súbor zostane nezmenený. Chcete pokračovať?': 'This document contains a digital signature. The application does not verify its validity. Saving a copy or inserting its pages will invalidate the signature. The original file will remain unchanged. Do you want to continue?',
     'Toto PDF obsahuje digitálny podpis.': 'This PDF contains a digital signature.',
     'Vyberte PDF alebo obrázok vo formáte JPG či PNG.': 'Choose a PDF, JPG or PNG file.',
     'Dokument nemá žiadnu stranu.': 'The document has no pages.',

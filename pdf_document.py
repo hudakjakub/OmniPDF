@@ -7,8 +7,12 @@ import tempfile
 import pymupdf
 
 
+class SignedPdfError(ValueError):
+    pass
+
+
 class PdfDocument:
-    def __init__(self, path):
+    def __init__(self, path, *, allow_signed=False):
         self.source = Path(path).resolve(strict=True)
         self.document = pymupdf.open(self.source)
         try:
@@ -19,12 +23,13 @@ class PdfDocument:
                     raise ValueError('The PDF is damaged and required repair.')
                 if self.document.permissions != -1 and not (self.document.permissions & pymupdf.PDF_PERM_MODIFY):
                     raise ValueError('This PDF does not permit editing.')
-                for page in self.document:
-                    if any(w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE and w.field_value for w in (page.widgets() or ())):
-                        raise ValueError('PDFs with signature fields are not supported.')
-                for xref in range(1, self.document.xref_length()):
-                    if self.document.xref_get_key(xref, 'Type') == ('name', '/Sig'):
-                        raise ValueError('Digitally signed PDFs are not supported.')
+                if not allow_signed:
+                    for page in self.document:
+                        if any(self._signed_widget(w) for w in (page.widgets() or ())):
+                            raise SignedPdfError('PDFs with signature fields are not supported.')
+                    for xref in range(1, self.document.xref_length()):
+                        if self.document.xref_get_key(xref, 'Type') == ('name', '/Sig'):
+                            raise SignedPdfError('Digitally signed PDFs are not supported.')
             else:
                 if self.source.suffix.lower() not in ('.jpg', '.jpeg', '.png'):
                     raise ValueError('Only PDF, JPG and PNG files are supported.')
@@ -99,11 +104,11 @@ class PdfDocument:
                                          start_at=page_index + 1, annots=True, widgets=True)
         self._change_pages(page_index, duplicate)
 
-    def insert_pdf(self, path, after_page_index):
+    def insert_pdf(self, path, after_page_index, *, allow_signed=False):
         with pymupdf.open(path) as check:
             if not check.is_pdf:
                 raise ValueError('Only PDF files can be inserted.')
-        source = PdfDocument(path)
+        source = PdfDocument(path, allow_signed=allow_signed)
         try:
             self._change_pages(after_page_index, lambda: self.document.insert_pdf(
                 source.document, start_at=after_page_index + 1, annots=True, widgets=True), allow_empty=True)
@@ -176,14 +181,28 @@ class PdfDocument:
     def render(self, page_index, scale=1.5, clip=None):
         page = self.document[page_index]
         matrix = pymupdf.Matrix(scale, scale)
-        if not any(w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE and not w.field_value for w in (page.widgets() or ())):
+        if not any(w.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE and not self._signed_widget(w) for w in (page.widgets() or ())):
             return page.get_pixmap(matrix=matrix, clip=clip, alpha=False)
         with pymupdf.open('pdf', self.document.tobytes()) as preview:
             page = preview[page_index]
             for widget in list(page.widgets() or ()):
-                if widget.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE and not widget.field_value:
+                if widget.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE and not self._signed_widget(widget, preview):
                     page.delete_widget(widget)
             return page.get_pixmap(matrix=matrix, clip=clip, alpha=False)
+
+    def _signed_widget(self, widget, document=None):
+        if widget.field_type != pymupdf.PDF_WIDGET_TYPE_SIGNATURE:
+            return False
+        document = document or self.document
+        xref = widget.xref
+        visited = set()
+        while xref and xref not in visited:
+            visited.add(xref)
+            if document.xref_get_key(xref, 'V')[0] != 'null':
+                return True
+            kind, value = document.xref_get_key(xref, 'Parent')
+            xref = int(value.split()[0]) if kind == 'xref' else None
+        return bool(widget.field_value)
 
     def cover_region(self, page_index, bbox, destination=None):
         page = self.document[page_index]

@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
-from pdf_document import PdfDocument
+from pdf_document import PdfDocument, SignedPdfError
 from windows_ocr import recognize
 from app_info import APP_NAME, VERSION, PROJECT_URL
 from i18n import _, configure_language
@@ -1083,6 +1083,13 @@ class Editor(QMainWindow):
             return self.save_copy()
         return answer == QMessageBox.StandardButton.Discard
 
+    def _confirm_signed_pdf(self):
+        return QMessageBox.question(
+            self, _('Digitálne podpísané PDF'),
+            _('Tento dokument obsahuje digitálny podpis. Aplikácia neoveruje jeho platnosť. Uložením kópie alebo vložením strán sa podpis zneplatní. Pôvodný súbor zostane nezmenený. Chcete pokračovať?'),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
+
     def open_file(self, checked=False, path=None):
         if self._busy() or not self._leave_document():
             return
@@ -1091,7 +1098,12 @@ class Editor(QMainWindow):
         if not path:
             return
         try:
-            document = PdfDocument(path)
+            try:
+                document = PdfDocument(path)
+            except SignedPdfError:
+                if not self._confirm_signed_pdf():
+                    return
+                document = PdfDocument(path, allow_signed=True)
         except Exception as exc:
             self._error(exc)
             return
@@ -1307,7 +1319,12 @@ class Editor(QMainWindow):
             return
         try:
             index = self.pdf.page_count - 1 if append or not self.pdf.page_count else self.page_index
-            self.pdf.insert_pdf(path, index)
+            try:
+                self.pdf.insert_pdf(path, index)
+            except SignedPdfError:
+                if not self._confirm_signed_pdf():
+                    return
+                self.pdf.insert_pdf(path, index, allow_signed=True)
         except Exception as exc:
             self._error(exc)
             return

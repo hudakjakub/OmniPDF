@@ -439,6 +439,8 @@ class PdfDocumentTests(unittest.TestCase):
         doc.close()
         with self.assertRaisesRegex(ValueError, 'Encrypted'):
             PdfDocument(path)
+        with self.assertRaisesRegex(ValueError, 'Encrypted'):
+            PdfDocument(path, allow_signed=True)
 
     def test_empty_signature_field_is_accepted(self):
         path = self.root / 'unsigned.pdf'
@@ -453,6 +455,15 @@ class PdfDocumentTests(unittest.TestCase):
         doc.close()
         unsigned = PdfDocument(path)
         unsigned.close()
+
+    def test_accepting_signatures_does_not_bypass_pdf_permissions(self):
+        path = self.root / 'read-only.pdf'
+        with pymupdf.open() as doc:
+            doc.new_page()
+            doc.save(path, encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw='owner',
+                     user_pw='', permissions=pymupdf.PDF_PERM_PRINT)
+        with self.assertRaisesRegex(ValueError, 'permit editing'):
+            PdfDocument(path, allow_signed=True)
 
     def test_signature_dictionary_is_rejected(self):
         path = self.root / 'signed.pdf'

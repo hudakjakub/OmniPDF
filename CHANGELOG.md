@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+
+- Allow signed PDFs after explicit confirmation that saving a copy invalidates signatures.
+
 ## 0.1.5
 
 - Display the application in Slovak or English based on the system UI language.

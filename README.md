@@ -59,7 +59,7 @@ Klávesové skratky: **Ctrl+O** otvorí súbor, **Ctrl+S** alebo **Ctrl+Shift+S*
 - Zakrývací box používa jednu farbu pozadia. Na fotografii, prechode farieb alebo vzore nemusí dokonale splynúť s okolím.
 - OCR závisí od jazykov OCR nainštalovaných vo Windows. Pred importom fotografie alebo skeny ručne narovnajte a orežte; čísla po rozpoznaní skontrolujte.
 - Aplikácia automaticky neprepočítava DPH ani iné sumy.
-- Šifrované a digitálne podpísané súbory sa odmietnu.
+- Šifrované súbory a PDF so zakázanými úpravami sa odmietnu. Digitálne podpísané PDF možno po potvrdení otvoriť alebo vložiť; aplikácia platnosť podpisu neoveruje a uložená kópia nebude mať platný pôvodný podpis.
 - Stranu s neaplikovanými anotáciami na začiernenie nemožno upravovať, aby sa omylom neodstránil ďalší obsah.
 
 ## Overenie
