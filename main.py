@@ -700,7 +700,7 @@ class Editor(QMainWindow):
         self.file_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         row.addWidget(self.file_label, 1)
         self.open_button = self._tool_button('Otvoriť súbor (Ctrl+O)', 'open', self.open_file, row)
-        self.save_button = self._tool_button('Uložiť kópiu (Ctrl+Shift+S)', 'save', self.save_copy, row)
+        self.save_button = self._tool_button('Uložiť kópiu (Ctrl+S alebo Ctrl+Shift+S)', 'save', self.save_copy, row)
         self._toolbar_separator(row)
         self.undo_button = self._tool_button('Späť (Ctrl+Z)', 'undo', self.undo, row)
         self.redo_button = self._tool_button('Dopredu (Ctrl+Y)', 'redo', self.redo, row)
@@ -732,15 +732,15 @@ class Editor(QMainWindow):
         self.cover_button.setCheckable(True)
         self.cover_button.toggled.connect(self._cover_toggled)
         self._toolbar_separator(bar)
-        self.minus_button = self._tool_button('Oddialiť', 'minus', lambda: self.view.zoom(0.8), bar)
+        self.minus_button = self._tool_button('Oddialiť (Ctrl+-)', 'minus', lambda: self.view.zoom(0.8), bar)
         self.zoom_label = QLabel('100 %')
         self.zoom_label.setObjectName('zoomLevel')
         self.zoom_label.setMinimumWidth(42)
         self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.zoom_label.setToolTip('Zväčšenie dokumentu')
         bar.addWidget(self.zoom_label)
-        self.plus_button = self._tool_button('Priblížiť', 'plus', lambda: self.view.zoom(1.25), bar)
-        self.fit_button = self._tool_button('Na šírku', 'fit', lambda: self.view.fit_width(), bar)
+        self.plus_button = self._tool_button('Priblížiť (Ctrl++ alebo Ctrl+=)', 'plus', lambda: self.view.zoom(1.25), bar)
+        self.fit_button = self._tool_button('Na šírku (Ctrl+0)', 'fit', lambda: self.view.fit_width(), bar)
         toolbar_layout.addLayout(bar, 0, 2, Qt.AlignmentFlag.AlignRight)
         side_width = max(row.minimumSize().width(), bar.minimumSize().width())
         toolbar_layout.setColumnMinimumWidth(0, side_width)
@@ -896,7 +896,13 @@ class Editor(QMainWindow):
         self.setCentralWidget(root)
         self.statusBar().addPermanentWidget(QLabel(f'v{VERSION}'))
         self.statusBar().showMessage('Pripravené. Spracovanie prebieha lokálne bez nahrávania súborov.')
-        for keys, callback in [('Ctrl+O', self.open_file), ('Ctrl+Shift+S', self.save_copy), ('Ctrl+Z', self.undo), ('Ctrl+Y', self.redo), ('Ctrl+Shift+Z', self.redo), ('Esc', self.cancel_selection)]:
+        for keys, callback in [
+            ('Ctrl+O', self.open_file), ('Ctrl+S', self.save_button.click),
+            ('Ctrl+Shift+S', self.save_button.click), ('Ctrl+Z', self.undo),
+            ('Ctrl+Y', self.redo), ('Ctrl+Shift+Z', self.redo), ('Esc', self.cancel_selection),
+            ('Ctrl++', self.plus_button.click), ('Ctrl+=', self.plus_button.click),
+            ('Ctrl+-', self.minus_button.click), ('Ctrl+0', self.fit_button.click),
+        ]:
             action = QAction(self)
             action.setShortcut(QKeySequence(keys))
             action.triggered.connect(callback)

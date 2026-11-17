@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Add standard keyboard shortcuts for saving and document zoom.
+
 ## 0.1.3
 
 - Show move and resize cursors over the selected area and its handles.

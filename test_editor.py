@@ -58,6 +58,44 @@ class EditorTests(unittest.TestCase):
         self.window.close()
         self.temp.cleanup()
 
+    def test_standard_save_and_zoom_shortcuts(self):
+        window = self.window
+        view = window.view
+        view.setFocus()
+        with patch.object(QFileDialog, 'getSaveFileName', return_value=('', '')) as dialog:
+            QTest.keyClick(view, Qt.Key.Key_S, Qt.KeyboardModifier.ControlModifier)
+            self.assertEqual(dialog.call_count, 1)
+            QTest.keyClick(view, Qt.Key.Key_S, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+            self.assertEqual(dialog.call_count, 2)
+        original = view.transform().m11()
+        QTest.keyClick(view, Qt.Key.Key_Plus, Qt.KeyboardModifier.ControlModifier)
+        self.assertGreater(view.transform().m11(), original)
+        QTest.keyClick(view, Qt.Key.Key_Minus, Qt.KeyboardModifier.ControlModifier)
+        self.assertAlmostEqual(view.transform().m11(), original)
+        QTest.keyClick(view, Qt.Key.Key_Equal, Qt.KeyboardModifier.ControlModifier)
+        self.assertGreater(view.transform().m11(), original)
+        QTest.keyClick(view, Qt.Key.Key_0, Qt.KeyboardModifier.ControlModifier)
+        self.assertTrue(view.fit_to_width)
+        window.select_text(window.pdf.spans(0)[0])
+        window.text.setFocus()
+        with patch.object(QFileDialog, 'getSaveFileName', return_value=('', '')) as dialog:
+            QTest.keyClick(window.text, Qt.Key.Key_S, Qt.KeyboardModifier.ControlModifier)
+            self.assertEqual(dialog.call_count, 1)
+        original_text = window.text.toPlainText()
+        original = view.transform().m11()
+        QTest.keyClick(window.text, Qt.Key.Key_Plus, Qt.KeyboardModifier.ControlModifier)
+        self.assertGreater(view.transform().m11(), original)
+        self.assertEqual(window.text.toPlainText(), original_text)
+        window.cancel_selection()
+        window.delete_page()
+        window.delete_page()
+        original = view.transform().m11()
+        with patch.object(QFileDialog, 'getSaveFileName') as dialog:
+            QTest.keyClick(window, Qt.Key.Key_S, Qt.KeyboardModifier.ControlModifier)
+            QTest.keyClick(window, Qt.Key.Key_Plus, Qt.KeyboardModifier.ControlModifier)
+            dialog.assert_not_called()
+        self.assertEqual(view.transform().m11(), original)
+
     def test_select_edit_save_and_undo(self):
         window = self.window
         self.assertEqual(window.page_label.text(), '1 / 2')

@@ -46,7 +46,9 @@ Kompaktný klasický panel spája všetko do jedného riadka: názov dokumentu a
    Za poslednou stranou je karta **+** s prerušovaným rámom. Kliknutím vyberte ďalšie PDF alebo ho pretiahnite na kartu; všetky jeho strany sa pridajú na koniec otvoreného dokumentu.
    Malé **×** pri miniatúre odstráni príslušnú stranu; ikona dvoch listov ju duplikuje. Ikona listov **Spravovať strany** hore otvorí tieto akcie aj vloženie všetkých strán ďalšieho PDF za aktuálnu stranu. Rovnaká ponuka je dostupná pravým tlačidlom na miniatúre. Poslednú stranu nemožno odstrániť. Aj tieto úpravy podporujú Späť/Dopredu a zapisujú sa až pri uložení kópie.
 7. Ikona zakrivenej šípky doľava / **Ctrl+Z** vráti zmenu, šípka doprava / **Ctrl+Y** alebo **Ctrl+Shift+Z** ju zopakuje. Nová úprava po návrate zahodí predchádzajúcu vetvu Dopredu. Opakované písanie v tom istom vybranom úseku tvorí jeden krok späť.
-8. PDF kópiu uložte tlačidlom **Uložiť kópiu** alebo pomocou Ctrl+Shift+S. Automaticky sa mení náhľad; zápis PDF na disk zostáva na tomto tlačidle. Existujúci súbor nemožno prepísať.
+8. PDF kópiu uložte tlačidlom **Uložiť kópiu**, pomocou **Ctrl+S** alebo **Ctrl+Shift+S**. Automaticky sa mení náhľad; zápis PDF na disk zostáva na tomto tlačidle. Existujúci súbor nemožno prepísať.
+
+Klávesové skratky: **Ctrl+O** otvorí súbor, **Ctrl+S** alebo **Ctrl+Shift+S** uloží kópiu, **Ctrl+Z** vráti úpravu, **Ctrl+Y** alebo **Ctrl+Shift+Z** ju zopakuje. **Ctrl++** alebo **Ctrl+=** priblíži dokument, **Ctrl+-** ho oddiali a **Ctrl+0** prispôsobí šírke okna. **Escape** zruší výber a **Delete** vymaže obsah vybraný na strane; pri písaní v textovom poli fungujú bežné skratky pre text.
 
 ## Obmedzenia
 
