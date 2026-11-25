@@ -29,4 +29,4 @@ Find the installer and portable app for Windows x64 on the [latest release page]
 
 ---
 
-[User guide](docs/usage.md) · [Development](docs/development.md) · [Changelog](docs/CHANGELOG.md) · [AGPL v3 license](LICENSE)
+[User guide](docs/usage.md) · [Development](docs/development.md) · [Changelog](docs/CHANGELOG.md) · [Code signing policy](docs/code-signing.md) · [AGPL v3 license](LICENSE)

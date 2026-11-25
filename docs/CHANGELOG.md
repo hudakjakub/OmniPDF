@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.18
+
+- Document the proposed code signing policy and update privacy information.
+
 ## 0.1.17
 
 - Present the project documentation, workflow labels and application screenshot in English.
