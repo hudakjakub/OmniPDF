@@ -1,42 +1,53 @@
 <div align="center">
-  <img src="assets/omni.svg" width="80" alt="Logo Omni PDF">
+  <img src="omnipdf/assets/omni.svg" width="72" alt="Logo Omni PDF">
   <h1>Omni PDF</h1>
-  <p><strong>Jednoduché úpravy PDF priamo vo Windows.</strong></p>
+  <p><strong>Upravuj PDF jednoducho, priamo vo Windows.</strong></p>
   <p>Bez účtu · Lokálne spracovanie · Slovenčina a angličtina</p>
-  <a href="https://github.com/hudakjakub/OmniPDF/actions/workflows/windows.yml"><img src="https://github.com/hudakjakub/OmniPDF/actions/workflows/windows.yml/badge.svg" alt="Stav CI a CD"></a>
-  <p><a href="https://github.com/hudakjakub/OmniPDF/releases/latest"><strong>Stiahnuť Omni PDF</strong></a></p>
+  <p>
+    <a href="https://github.com/hudakjakub/OmniPDF/actions/workflows/windows.yml"><img src="https://github.com/hudakjakub/OmniPDF/actions/workflows/windows.yml/badge.svg?branch=main&amp;event=push" alt="Stav CI a zostavenia na main"></a>
+    <a href="https://github.com/hudakjakub/OmniPDF/releases/latest"><img src="https://img.shields.io/github/v/release/hudakjakub/OmniPDF?label=vydanie&amp;color=087f83" alt="Najnovšie vydanie"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/licencia-AGPL--3.0-087f83" alt="Licencia AGPL 3.0"></a>
+  </p>
+  <p><strong><a href="https://github.com/hudakjakub/OmniPDF/releases/latest">Stiahnuť pre Windows ↓</a></strong> &nbsp; · &nbsp; <a href="docs/pouzivanie.md">Používanie</a> &nbsp; · &nbsp; <a href="docs/vyvoj.md">Vývoj</a></p>
+  <br>
+  <img src="docs/images/omni-pdf.png" alt="Omni PDF: ukážka úpravy textu v PDF dokumente" width="100%">
 </div>
 
-## Čo dokáže
+## Jednoduchšie každodenné úpravy
 
-- Upraviť text, pridať textové pole alebo presunúť a odstrániť časť strany.
-- Spojiť PDF, usporiadať strany a spracovať sken alebo fotografiu pomocou Windows OCR.
-- Vytlačiť dokument a uložiť úpravy do novej PDF kópie.
+- **Upravuj obsah** — prepíš text, pridaj vlastný alebo presuň či odstráň označenú oblasť.
+- **Spravuj strany** — spoj dokumenty, vlož, duplikuj alebo odstráň strany.
+- **Pracuj aj so skenmi** — otvor PDF, JPG či PNG a použi rozpoznávanie textu vo Windows.
 
-## Začíname
+Dokumenty zostávajú v počítači. Po úpravách ich môžeš vytlačiť alebo uložiť ako novú PDF kópiu.
 
-Na stránke [vydaní](https://github.com/hudakjakub/OmniPDF/releases/latest) nájdeš inštalátor aj prenosnú verziu pre Windows x64. Aplikácia na úpravu dokumentov nepotrebuje účet ani internet; pripojenie používa pri kontrole a sťahovaní aktualizácií.
+## Stiahnutie
 
-Aktuálne vydania nie sú digitálne podpísané, takže ich Windows môže upozornením alebo pravidlom zabezpečenia zablokovať.
+Na stránke [najnovšieho vydania](https://github.com/hudakjakub/OmniPDF/releases/latest) nájdeš inštalátor aj prenosnú verziu pre Windows x64. Aktualizáciu aplikácia ponúkne na potvrdenie.
 
-[Používanie a obmedzenia](docs/pouzivanie.md) · [Vývoj a zostavenie](docs/vyvoj.md) · [História zmien](CHANGELOG.md)
+> Aktuálne vydania nie sú digitálne podpísané. Windows preto môže aplikáciu alebo inštalátor zablokovať.
 
 ## CI / CD
 
-Každá zmena prechádza automatickými kontrolami. Po úspešnom zostavení vzniknú Windows balíky; release tag navyše zverejní vydanie na GitHube.
+Pull requesty, zmeny na `main` a release tagy prechádzajú kontrolami na Windows. Balíky sa po zostavení overia a release tag z nich vytvorí GitHub Release.
 
 ```mermaid
 flowchart LR
-    A["Pull request · main · tag · ručne"] --> B["CI<br/>Testy a kontrola verzie"]
+    A["PR · main · tag · ručne"] --> B["CI<br/>Testy a verzia"]
     B -->|"Pull request"| C["Výsledok kontrol"]
-    B -->|"main · tag · ručne"| D["Build<br/>EXE a inštalátor"]
+    B -->|"push · tag · ručne"| D["Build<br/>EXE a inštalátor"]
     D --> E["Overenie<br/>Inštalácia a aktualizácia"]
-    E --> F["GitHub Actions<br/>Artefakt"]
+    E --> F["Actions<br/>Artefakty"]
     F -->|"tag v*"| G["CD<br/>GitHub Release"]
+
+    classDef standard fill:#eef8f7,stroke:#9acac7,color:#163b3d,stroke-width:1px;
+    classDef output fill:#087f83,stroke:#087f83,color:#ffffff,stroke-width:1px;
+    class A,B,C,D,E,F standard;
+    class G output;
 ```
 
-[Zobraziť workflow](https://github.com/hudakjakub/OmniPDF/actions/workflows/windows.yml) · [Ako funguje vydanie](docs/vyvoj.md#vývoj-a-vydávanie)
+[Stav workflow](https://github.com/hudakjakub/OmniPDF/actions/workflows/windows.yml) · [Ako funguje vydávanie](docs/vyvoj.md#vývoj-a-vydávanie)
 
 ---
 
-[GNU AGPL v3](LICENSE) · [Licencie závislostí](THIRD_PARTY_NOTICES.md)
+[Používanie a obmedzenia](docs/pouzivanie.md) · [Vývoj](docs/vyvoj.md) · [Zmeny](docs/CHANGELOG.md) · [Licencia AGPL v3](LICENSE)

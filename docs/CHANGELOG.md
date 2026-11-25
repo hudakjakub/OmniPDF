@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.15
+
+- Improve the GitHub project page with an application preview and a clearer CI/CD overview.
+
 ## 0.1.14
 
 - Organize application modules, tests and documentation into dedicated folders.

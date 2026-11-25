@@ -13,7 +13,7 @@ from PySide6.QtPrintSupport import QPrinter, QPrintPreviewWidget
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QPushButton
 
-from main import Editor
+from omnipdf.main import Editor
 
 
 class PrintingTests(unittest.TestCase):
@@ -33,7 +33,7 @@ class PrintingTests(unittest.TestCase):
             doc.save(self.source)
         self.original = self.source.read_bytes()
         self.window = Editor()
-        self.helper_patch = patch('main.helper_ready', return_value=False)
+        self.helper_patch = patch('omnipdf.main.helper_ready', return_value=False)
         self.helper_patch.start()
         self.preview_patch = patch.object(self.window, '_show_print_preview', return_value=True)
         self.preview_patch.start()
@@ -61,7 +61,7 @@ class PrintingTests(unittest.TestCase):
             printer.setPageRanges(QPageRanges.fromString('1,3'))
             printer.setPageOrder(QPrinter.PageOrder.LastPageFirst)
             return Mock(exec=Mock(return_value=QDialog.DialogCode.Accepted))
-        with patch('main.QPrintDialog', side_effect=dialog):
+        with patch('omnipdf.main.QPrintDialog', side_effect=dialog):
             self.window.print_document()
         with pymupdf.open(output) as printed:
             self.assertEqual(printed.page_count, 2)
@@ -74,7 +74,7 @@ class PrintingTests(unittest.TestCase):
     def test_cancelled_dialog_does_not_print(self):
         self.window.select_text(self.window.pdf.spans(0)[0])
         self.window.text.setPlainText('Best')
-        with patch('main.QPrintDialog') as dialog:
+        with patch('omnipdf.main.QPrintDialog') as dialog:
             dialog.return_value.exec.return_value = QDialog.DialogCode.Rejected
             self.window.print_document()
         self.assertFalse(self.window.pending)
@@ -83,7 +83,7 @@ class PrintingTests(unittest.TestCase):
 
     def test_cancelling_preview_does_not_open_print_dialog(self):
         self.preview_patch.stop()
-        with patch.object(self.window, '_show_print_preview', return_value=False), patch('main.QPrintDialog') as dialog:
+        with patch.object(self.window, '_show_print_preview', return_value=False), patch('omnipdf.main.QPrintDialog') as dialog:
             self.window.print_document()
         dialog.assert_not_called()
 
@@ -122,7 +122,7 @@ class PrintingTests(unittest.TestCase):
             printer.setResolution(72)
             printer.setPrintRange(QPrinter.PrintRange.CurrentPage)
             return Mock(exec=Mock(return_value=QDialog.DialogCode.Accepted))
-        with patch('main.QPrintDialog', side_effect=dialog):
+        with patch('omnipdf.main.QPrintDialog', side_effect=dialog):
             self.window.print_document()
         self.assertIn('Best', self.window.pdf.document[1].get_text())
         self.assertFalse(self.window.pending)
@@ -142,7 +142,7 @@ class PrintingTests(unittest.TestCase):
             printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
             printer.setOutputFileName(str(output))
             return Mock(exec=Mock(return_value=QDialog.DialogCode.Accepted))
-        with patch('main.QPrintDialog', side_effect=dialog), patch.object(self.window, '_error') as error:
+        with patch('omnipdf.main.QPrintDialog', side_effect=dialog), patch.object(self.window, '_error') as error:
             self.window.print_document()
         error.assert_called_once()
         self.assertFalse(output.exists())
@@ -151,28 +151,28 @@ class PrintingTests(unittest.TestCase):
 
     def test_print_shortcut_and_no_pages(self):
         self.window.view.setFocus()
-        with patch('main.QPrintDialog') as dialog:
+        with patch('omnipdf.main.QPrintDialog') as dialog:
             dialog.return_value.exec.return_value = QDialog.DialogCode.Rejected
             QTest.keyClick(self.window.view, Qt.Key.Key_P, Qt.KeyboardModifier.ControlModifier)
             dialog.assert_called_once()
         for _index in range(3):
             self.window.delete_page()
         self.assertFalse(self.window.print_button.isEnabled())
-        with patch('main.QPrintDialog') as dialog:
+        with patch('omnipdf.main.QPrintDialog') as dialog:
             QTest.keyClick(self.window, Qt.Key.Key_P, Qt.KeyboardModifier.ControlModifier)
             dialog.assert_not_called()
 
     def test_windows_helper_opens_system_preview_with_current_document(self):
-        with patch('main.sys.platform', 'win32'), patch('main.Path.is_file', return_value=True), patch('main.helper_ready', return_value=True), \
-             patch('main.print_native', return_value=True) as native, patch('main.QPrintDialog') as dialog:
+        with patch('omnipdf.main.sys.platform', 'win32'), patch('omnipdf.main.Path.is_file', return_value=True), patch('omnipdf.main.helper_ready', return_value=True), \
+             patch('omnipdf.main.print_native', return_value=True) as native, patch('omnipdf.main.QPrintDialog') as dialog:
             self.window.print_document()
         native.assert_called_once()
         self.assertIs(native.call_args.args[0], self.window.pdf)
         dialog.assert_not_called()
 
     def test_unavailable_windows_helper_keeps_existing_print_dialog(self):
-        with patch('main.sys.platform', 'win32'), patch('main.Path.is_file', return_value=True), \
-             patch('main.helper_ready', return_value=False), patch('main.QPrintDialog') as dialog:
+        with patch('omnipdf.main.sys.platform', 'win32'), patch('omnipdf.main.Path.is_file', return_value=True), \
+             patch('omnipdf.main.helper_ready', return_value=False), patch('omnipdf.main.QPrintDialog') as dialog:
             dialog.return_value.exec.return_value = QDialog.DialogCode.Rejected
             self.window.print_document()
         dialog.assert_called_once()
@@ -186,7 +186,7 @@ class PrintingTests(unittest.TestCase):
             printer.setPrintRange(QPrinter.PrintRange.CurrentPage)
             printer.setCopyCount(2)
             return Mock(exec=Mock(return_value=QDialog.DialogCode.Accepted))
-        with patch('main.QPrintDialog', side_effect=dialog):
+        with patch('omnipdf.main.QPrintDialog', side_effect=dialog):
             self.window.print_document()
         with pymupdf.open(output) as printed:
             self.assertEqual(printed.page_count, 2)
@@ -196,7 +196,7 @@ class PrintingTests(unittest.TestCase):
             printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
             printer.setOutputFileName(str(self.root / 'missing' / 'print.pdf'))
             return Mock(exec=Mock(return_value=QDialog.DialogCode.Accepted))
-        with patch('main.QPrintDialog', side_effect=dialog), patch.object(self.window, '_error') as error:
+        with patch('omnipdf.main.QPrintDialog', side_effect=dialog), patch.object(self.window, '_error') as error:
             self.window.print_document()
         error.assert_called_once()
         self.assertEqual(self.source.read_bytes(), self.original)

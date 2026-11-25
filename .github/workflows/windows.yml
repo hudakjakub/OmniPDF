@@ -28,7 +28,7 @@ jobs:
           python-version: '3.14'
           architecture: x64
       - name: Závislosti
-        run: python -m pip install -r requirements.txt -r requirements-build.txt
+        run: python -m pip install -r requirements/runtime.txt -r requirements/build.txt
       - name: Tlačový komponent
         run: dotnet build windows_print/WindowsPrint.csproj -c Release -p:Platform=x64
       - name: Automatické testy
@@ -57,7 +57,7 @@ jobs:
           python-version: '3.14'
           architecture: x64
       - name: Závislosti
-        run: python -m pip install -r requirements.txt -r requirements-build.txt
+        run: python -m pip install -r requirements/runtime.txt -r requirements/build.txt
       - name: Prenosná aplikácia a inštalátor
         run: python scripts/build_windows.py
         env:

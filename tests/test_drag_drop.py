@@ -12,7 +12,7 @@ from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDro
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from main import Editor
+from omnipdf.main import Editor
 
 
 class DragDropTests(unittest.TestCase):

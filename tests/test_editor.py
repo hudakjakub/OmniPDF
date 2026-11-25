@@ -13,7 +13,7 @@ from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
-from main import Editor, STYLE
+from omnipdf.main import Editor, STYLE
 
 
 class EditorTests(unittest.TestCase):
@@ -523,7 +523,7 @@ class EditorTests(unittest.TestCase):
     def test_automatic_ocr_runs_once_for_image_and_not_native_text(self):
         window = self.window
         self.auto_ocr_patch.stop()
-        with patch('main.recognize', return_value=[{'text': 'Scan text', 'bbox': (100, 120, 300, 170)}]) as recognize:
+        with patch('omnipdf.main.recognize', return_value=[{'text': 'Scan text', 'bbox': (100, 120, 300, 170)}]) as recognize:
             window.render_page()
             self.app.processEvents()
             recognize.assert_not_called()

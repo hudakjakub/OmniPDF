@@ -8,7 +8,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QFileDialog, QLineEdit, QMessageBox
 
-from main import Editor, apply_light_theme
+from omnipdf.main import Editor, apply_light_theme
 
 
 class LightThemeTests(unittest.TestCase):

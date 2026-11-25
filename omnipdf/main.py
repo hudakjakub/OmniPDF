@@ -28,7 +28,11 @@ from omnipdf.native_print import helper_ready, print_native
 from omnipdf.window_chrome import configure_title_bar, set_app_id, create_app_mutex, release_app_mutex
 
 
-APP_ICON = Path(__file__).with_name('assets') / 'omni.svg'
+def project_root():
+    return Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent.parent))
+
+
+APP_ICON = project_root() / 'omnipdf' / 'assets' / 'omni.svg'
 
 
 ERRORS = {
@@ -1104,9 +1108,10 @@ class Editor(QMainWindow):
     def print_document(self):
         if not self.pdf or self._busy() or not self.pdf.page_count or not self._discard_pending():
             return
-        native_helper = Path(__file__).with_name('windows_print') / 'WindowsPrint.exe'
+        root = project_root()
+        native_helper = root / 'windows_print' / 'WindowsPrint.exe'
         if not getattr(sys, 'frozen', False):
-            native_helper = Path(__file__).parent / 'build' / 'release-inputs' / 'windows_print' / 'WindowsPrint.exe'
+            native_helper = root / 'build' / 'release-inputs' / 'windows_print' / 'WindowsPrint.exe'
         if sys.platform == 'win32' and native_helper.is_file():
             self.setEnabled(False)
             error = None
@@ -2126,9 +2131,9 @@ def smoke_test(application, output):
     result = {'app_name': APP_NAME, 'version': VERSION, 'frozen': bool(getattr(sys, 'frozen', False)),
               'qt_platform': application.platformName(), 'resources_ok': False, 'pdf_render_ok': False}
     try:
-        root = Path(__file__).resolve().parent
+        root = project_root()
         result['resources_ok'] = all((root / path).is_file() for path in
-            ('assets/omni.svg', 'assets/check.svg', 'omnipdf/windows_ocr.ps1', 'LICENSE', 'THIRD_PARTY_NOTICES.md'))
+            ('omnipdf/assets/omni.svg', 'omnipdf/assets/check.svg', 'omnipdf/windows_ocr.ps1', 'LICENSE', 'docs/THIRD_PARTY_NOTICES.md'))
         if result['frozen']:
             result['resources_ok'] = result['resources_ok'] and (root / 'windows_print' / 'WindowsPrint.exe').is_file()
         with tempfile.TemporaryDirectory(prefix='omnipdf-smoke-') as directory:

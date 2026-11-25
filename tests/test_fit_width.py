@@ -8,7 +8,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import pymupdf
 from PySide6.QtWidgets import QApplication
 
-from main import Editor, PageView
+from omnipdf.main import Editor, PageView
 
 
 class FitWidthTests(unittest.TestCase):

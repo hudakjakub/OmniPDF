@@ -14,7 +14,7 @@ from PySide6.QtCore import QSettings, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QPushButton
 
-from main import Editor
+from omnipdf.main import Editor
 from omnipdf import updates
 from omnipdf.updates import Release
 
@@ -28,7 +28,7 @@ class UpdateUiTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.settings = QSettings(str(self.root / 'settings.ini'), QSettings.Format.IniFormat)
-        with patch('main.QSettings', return_value=self.settings):
+        with patch('omnipdf.main.QSettings', return_value=self.settings):
             self.window = Editor()
         self.window._auto_ocr = lambda *args: None
         self.window._error = lambda error: self.fail(str(error))
@@ -56,7 +56,7 @@ class UpdateUiTests(unittest.TestCase):
         self.assertIsNone(self.window.update_worker)
 
     def test_manual_check_reports_latest_and_resets_action(self):
-        with patch('main.updates.check_for_update', return_value=None), patch.object(QMessageBox, 'information') as message:
+        with patch('omnipdf.main.updates.check_for_update', return_value=None), patch.object(QMessageBox, 'information') as message:
             self.window.check_updates()
             self.wait_for_worker()
             message.assert_called_once()
@@ -71,16 +71,16 @@ class UpdateUiTests(unittest.TestCase):
         self.window.open_file(path=source)
         self.window.select_text(self.window.pdf.spans(0)[0])
         self.window.text.setPlainText('Changed text')
-        with patch('main.sys.frozen', True, create=True), \
-             patch('main.updates.check_for_update', return_value=self.release), \
-             patch('main.updates.download_update', return_value=self.installer) as download, \
+        with patch('omnipdf.main.sys.frozen', True, create=True), \
+             patch('omnipdf.main.updates.check_for_update', return_value=self.release), \
+             patch('omnipdf.main.updates.download_update', return_value=self.installer) as download, \
              patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.No):
             self.window.check_updates()
             self.wait_for_worker()
         self.assertEqual(self.window.ready_update, (self.release, None))
         download.assert_not_called()
         with patch.object(QMessageBox, 'question', side_effect=[QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Cancel]), \
-             patch('main.updates.launch_installer') as launch:
+             patch('omnipdf.main.updates.launch_installer') as launch:
             self.window._offer_update()
             launch.assert_not_called()
         self.assertTrue(self.window.pending)
@@ -88,8 +88,8 @@ class UpdateUiTests(unittest.TestCase):
         output = self.root / 'copy.pdf'
         with patch.object(QMessageBox, 'question', side_effect=[QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Save]), \
              patch.object(QFileDialog, 'getSaveFileName', return_value=(str(output), 'PDF')), \
-             patch('main.updates.download_update', return_value=self.installer) as download, \
-             patch('main.updates.launch_installer') as launch:
+             patch('omnipdf.main.updates.download_update', return_value=self.installer) as download, \
+             patch('omnipdf.main.updates.launch_installer') as launch:
             self.window._offer_update()
             self.wait_for_worker()
             launch.assert_called_once()
@@ -104,7 +104,7 @@ class UpdateUiTests(unittest.TestCase):
         self.window.ready_update = (self.release, self.installer)
         self.installer.write_bytes(b'tampered')
         with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
-             patch.object(QMessageBox, 'warning') as warning, patch('main.updates.launch_installer') as launch:
+             patch.object(QMessageBox, 'warning') as warning, patch('omnipdf.main.updates.launch_installer') as launch:
             self.window._offer_update()
             self.wait_for_worker()
             launch.assert_not_called()
@@ -121,9 +121,9 @@ class UpdateUiTests(unittest.TestCase):
             while not cancelled():
                 time.sleep(0.01)
             raise RuntimeError('cancelled')
-        with patch('main.updates.download_update', side_effect=download), \
+        with patch('omnipdf.main.updates.download_update', side_effect=download), \
              patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
-             patch('main.updates.launch_installer') as launch, patch.object(QMessageBox, 'warning') as warning:
+             patch('omnipdf.main.updates.launch_installer') as launch, patch.object(QMessageBox, 'warning') as warning:
             self.window._offer_update()
             self.assertTrue(started.wait(1))
             QTest.qWait(50)
@@ -139,9 +139,9 @@ class UpdateUiTests(unittest.TestCase):
     def test_downloaded_installer_is_verified_before_launch(self):
         self.window.ready_update = (self.release, None)
         self.installer.write_bytes(b'tampered')
-        with patch('main.updates.download_update', return_value=self.installer), \
+        with patch('omnipdf.main.updates.download_update', return_value=self.installer), \
              patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
-             patch('main.updates.launch_installer') as launch, patch.object(QMessageBox, 'warning') as warning:
+             patch('omnipdf.main.updates.launch_installer') as launch, patch.object(QMessageBox, 'warning') as warning:
             self.window._offer_update()
             self.wait_for_worker()
             launch.assert_not_called()
@@ -154,7 +154,7 @@ class UpdateUiTests(unittest.TestCase):
         error = updates.UpdateError('Could not start the installer.')
         error.__cause__ = OSError(22, 'blocked', None, 4551)
         with patch('omnipdf.i18n.language', return_value='en'), \
-             patch('main.updates.launch_installer', side_effect=error), \
+             patch('omnipdf.main.updates.launch_installer', side_effect=error), \
              patch.object(QMessageBox, 'warning') as warning:
             self.window._launch_update()
         self.assertIn('Windows security policy', warning.call_args.args[2])
@@ -172,7 +172,7 @@ class UpdateUiTests(unittest.TestCase):
         self.window.text.setPlainText('Draft text')
         self.window.ready_update = (self.release, self.installer)
         with patch.object(QMessageBox, 'question', side_effect=[QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Discard]), \
-             patch('main.updates.launch_installer') as launch:
+             patch('omnipdf.main.updates.launch_installer') as launch:
             self.window._offer_update()
             self.wait_for_worker()
             launch.assert_called_once()
@@ -201,7 +201,7 @@ class UpdateUiTests(unittest.TestCase):
             started.set()
             gate.wait(2)
             return None
-        with patch('main.updates.check_for_update', side_effect=check), patch.object(QMessageBox, 'information') as message:
+        with patch('omnipdf.main.updates.check_for_update', side_effect=check), patch.object(QMessageBox, 'information') as message:
             self.window.check_updates()
             try:
                 self.assertTrue(started.wait(1))
@@ -230,8 +230,8 @@ class UpdateUiTests(unittest.TestCase):
             started.set()
             gate.wait(2)
         answers = [QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Discard, QMessageBox.StandardButton.Cancel]
-        with patch('main.updates.verify_installer', side_effect=verify), \
-             patch('main.updates.launch_installer') as launch, patch.object(QMessageBox, 'question', side_effect=answers):
+        with patch('omnipdf.main.updates.verify_installer', side_effect=verify), \
+             patch('omnipdf.main.updates.launch_installer') as launch, patch.object(QMessageBox, 'question', side_effect=answers):
             self.window._offer_update()
             try:
                 self.assertTrue(started.wait(1))
@@ -246,7 +246,7 @@ class UpdateUiTests(unittest.TestCase):
 
     def test_automatic_update_setting_can_disable_background_requests(self):
         self.window.auto_update_action.setChecked(False)
-        with patch('main.updates.check_for_update') as check:
+        with patch('omnipdf.main.updates.check_for_update') as check:
             self.window.check_updates(automatic=True)
             check.assert_not_called()
         self.assertFalse(self.settings.value('updates/automatic', True, type=bool))

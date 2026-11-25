@@ -9,7 +9,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import pymupdf
 from PySide6.QtWidgets import QApplication
 
-from main import Editor
+from omnipdf.main import Editor
 from omnipdf.pdf_document import PdfDocument
 
 

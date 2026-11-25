@@ -3,13 +3,12 @@
 ## Štruktúra projektu
 
 ```text
-main.py            Spustenie aplikácie a rozhranie
-omnipdf/           Spracovanie PDF, OCR, tlač, preklady a aktualizácie
+omnipdf/           Aplikácia, ikony, PDF, OCR, tlač a aktualizácie
 tests/             Automatické testy
-assets/            Ikony aplikácie
 windows_print/     Komponent systémovej tlače pre Windows
 packaging/         Nastavenie inštalátora
-scripts/           Zostavenie a overenie vydania
+requirements/      Závislosti aplikácie a zostavovania
+scripts/           Spustenie, zostavenie a overenie vydania
 docs/              Dokumentácia
 .github/workflows/ CI a CD na GitHube
 ```
@@ -20,11 +19,11 @@ Nainštaluj Python 3.14 a v koreňovom priečinku projektu spusti:
 
 ```cmd
 py -3.14 -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe main.py
+.venv\Scripts\python.exe -m pip install -r requirements\runtime.txt
+.venv\Scripts\python.exe -m omnipdf
 ```
 
-Aplikáciu možno spustiť aj súborom `Spustit.cmd`.
+Aplikáciu možno spustiť aj súborom `scripts\Spustit.cmd`.
 
 ## Overenie
 
@@ -40,7 +39,7 @@ Jediným zdrojom verzie je `VERSION` v `omnipdf/app_info.py`, vo formáte `MAJOR
 
 GitHub Actions spustí Windows testy pri pushi do `main` a pri pull requestoch. Push do `main` a ručné spustenie vytvoria EXE artifact. Tag `vMAJOR.MINOR.PATCH` spustí testy, zostavenie oboch EXE, kontrolu spustenia prenosnej aj nainštalovanej aplikácie a zverejnenie GitHub Release. Tag sa musí presne zhodovať s `VERSION`; existujúce vydanie sa neprepisuje.
 
-Pri novom vydaní upravte `omnipdf/app_info.py` a `CHANGELOG.md`, otestujte zmenu a po jej začlenení do `main` vytvorte tag, napríklad:
+Pri novom vydaní upravte `omnipdf/app_info.py` a `docs/CHANGELOG.md`, otestujte zmenu a po jej začlenení do `main` vytvorte tag, napríklad:
 
 ```cmd
 git tag v0.2.0
@@ -50,7 +49,7 @@ git push origin v0.2.0
 Lokálny Windows build vyžaduje Python 3.14 x64, .NET 10 SDK a Inno Setup 6. Cestu ku kompilátoru možno nastaviť premennou `ISCC`:
 
 ```cmd
-.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-build.txt
+.venv\Scripts\python.exe -m pip install -r requirements\runtime.txt -r requirements\build.txt
 .venv\Scripts\python.exe scripts\build_windows.py
 ```
 

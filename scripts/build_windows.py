@@ -105,18 +105,18 @@ def main():
     release = ROOT / 'release'
     release.mkdir(exist_ok=True)
     app = QApplication.instance() or QApplication([])
-    icon = QIcon(str(ROOT / 'assets' / 'omni.svg'))
+    icon = QIcon(str(ROOT / 'omnipdf' / 'assets' / 'omni.svg'))
     if not icon.pixmap(256, 256).save(str(build / 'omni.ico'), 'ICO'):
         raise RuntimeError('Could not render the application icon')
     (build / 'version.txt').write_text(version_metadata(VERSION), encoding='utf-8')
     subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--windowed',
-                    '--name', 'OmniPDF', '--specpath', str(build), '--icon', str(build / 'omni.ico'), '--version-file', str(build / 'version.txt'),
+                    '--name', 'OmniPDF', '--specpath', str(build), '--paths', str(ROOT), '--icon', str(build / 'omni.ico'), '--version-file', str(build / 'version.txt'),
                     *sum((['--add-data', f'{ROOT / name};{dest}'] for name, dest in
-                          [('assets', 'assets'), ('omnipdf/windows_ocr.ps1', 'omnipdf'), ('LICENSE', '.'), ('THIRD_PARTY_NOTICES.md', '.'),
+                          [('omnipdf/assets', 'omnipdf/assets'), ('omnipdf/windows_ocr.ps1', 'omnipdf'), ('LICENSE', '.'), ('docs/THIRD_PARTY_NOTICES.md', 'docs'),
                            (str(native_printer), 'windows_print'),
                            (str(Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)) / 'qtbase_sk.qm'), 'omnipdf/translations'),
                            (str(licenses), 'licenses')]), []),
-                    'main.py'], check=True, env=build_environment())
+                    'omnipdf/main.py'], check=True, env=build_environment())
     portable = release / 'OmniPDF-windows-x64.exe'
     shutil.copy2(ROOT / 'dist' / 'OmniPDF.exe', portable)
     subprocess.run([str(iscc), f'/DAppVersion={VERSION}', str(ROOT / 'packaging' / 'installer.iss')], check=True)

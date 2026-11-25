@@ -11,7 +11,7 @@ from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QToolButton
-from main import Editor, STYLE
+from omnipdf.main import Editor, STYLE
 
 
 class ThumbnailTests(unittest.TestCase):

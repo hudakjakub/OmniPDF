@@ -8,7 +8,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from main import PageView
+from omnipdf.main import PageView
 
 
 class ContinuousViewTests(unittest.TestCase):

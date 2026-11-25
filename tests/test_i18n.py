@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 import pymupdf
 
 from omnipdf.i18n import EN, configure_language, language
-from main import Editor
+from omnipdf.main import Editor
 
 
 class LanguageTests(unittest.TestCase):
