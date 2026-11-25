@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.17
+
+- Present the project documentation, workflow labels and application screenshot in English.
+
 ## 0.1.16
 
 - Integrate the latest PDF and OCR features with printing, update controls, and the reorganized project.
@@ -61,7 +65,7 @@
 
 ## 0.1.5
 
-- Display the application in Slovak or English based on the system UI language.
+- Display the application in the system UI language where supported.
 
 ## 0.1.4
 

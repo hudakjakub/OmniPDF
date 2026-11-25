@@ -12,11 +12,11 @@ permissions:
 
 jobs:
   test:
-    name: CI · Testy a kontrola verzie
+    name: CI · Tests and version check
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
-      - name: Zdrojový kód
+      - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: .NET SDK
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
@@ -27,30 +27,30 @@ jobs:
         with:
           python-version: '3.14'
           architecture: x64
-      - name: Závislosti
+      - name: Install dependencies
         run: python -m pip install -r requirements/runtime.txt -r requirements/build.txt
-      - name: Tlačový komponent
+      - name: Build print component
         run: dotnet build windows_print/WindowsPrint.csproj -c Release -p:Platform=x64
       - name: Prepare Windows OCR
         shell: powershell
         run: ./scripts/ensure_windows_ocr.ps1
-      - name: Automatické testy
+      - name: Run tests
         run: python -m unittest discover -v
         env:
           RUN_WINDOWS_OCR: '1'
-      - name: Verzia a release tag
+      - name: Validate version and release tag
         run: python scripts/build_windows.py --validate
         env:
           RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
 
   build:
-    name: Build · Windows balíky
+    name: Build · Windows packages
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - name: Zdrojový kód
+      - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: .NET SDK
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
@@ -61,19 +61,19 @@ jobs:
         with:
           python-version: '3.14'
           architecture: x64
-      - name: Závislosti
+      - name: Install dependencies
         run: python -m pip install -r requirements/runtime.txt -r requirements/build.txt
-      - name: Prenosná aplikácia a inštalátor
+      - name: Build portable app and installer
         run: python scripts/build_windows.py
         env:
           RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
       - name: Prepare Windows OCR
         shell: powershell
         run: ./scripts/ensure_windows_ocr.ps1
-      - name: Overenie inštalácie a aktualizácie
+      - name: Verify installation and updates
         shell: pwsh
         run: ./scripts/smoke_windows.ps1
-      - name: Uloženie balíkov
+      - name: Upload packages
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: OmniPDF-windows-x64
@@ -89,12 +89,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Stiahnutie zostavených balíkov
+      - name: Download packages
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: OmniPDF-windows-x64
           path: release
-      - name: Zverejnenie vydania
+      - name: Publish release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
