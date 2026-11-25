@@ -11,8 +11,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from app_info import VERSION
-from updates import INSTALLER_NAME
+from omnipdf.app_info import VERSION
+from omnipdf.updates import INSTALLER_NAME
 
 
 def validate_version(version, tag=None):
@@ -112,9 +112,9 @@ def main():
     subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--windowed',
                     '--name', 'OmniPDF', '--specpath', str(build), '--icon', str(build / 'omni.ico'), '--version-file', str(build / 'version.txt'),
                     *sum((['--add-data', f'{ROOT / name};{dest}'] for name, dest in
-                          [('assets', 'assets'), ('windows_ocr.ps1', '.'), ('LICENSE', '.'), ('THIRD_PARTY_NOTICES.md', '.'),
+                          [('assets', 'assets'), ('omnipdf/windows_ocr.ps1', 'omnipdf'), ('LICENSE', '.'), ('THIRD_PARTY_NOTICES.md', '.'),
                            (str(native_printer), 'windows_print'),
-                           (str(Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)) / 'qtbase_sk.qm'), 'translations'),
+                           (str(Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)) / 'qtbase_sk.qm'), 'omnipdf/translations'),
                            (str(licenses), 'licenses')]), []),
                     'main.py'], check=True, env=build_environment())
     portable = release / 'OmniPDF-windows-x64.exe'

@@ -19,13 +19,13 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
-from pdf_document import PdfDocument, SignedPdfError
-from windows_ocr import recognize
-from app_info import APP_NAME, VERSION, PROJECT_URL
-from i18n import _, configure_language
-import updates
-from native_print import helper_ready, print_native
-from window_chrome import configure_title_bar, set_app_id, create_app_mutex, release_app_mutex
+from omnipdf.pdf_document import PdfDocument, SignedPdfError
+from omnipdf.windows_ocr import recognize
+from omnipdf.app_info import APP_NAME, VERSION, PROJECT_URL
+from omnipdf.i18n import _, configure_language
+from omnipdf import updates
+from omnipdf.native_print import helper_ready, print_native
+from omnipdf.window_chrome import configure_title_bar, set_app_id, create_app_mutex, release_app_mutex
 
 
 APP_ICON = Path(__file__).with_name('assets') / 'omni.svg'
@@ -2128,7 +2128,7 @@ def smoke_test(application, output):
     try:
         root = Path(__file__).resolve().parent
         result['resources_ok'] = all((root / path).is_file() for path in
-            ('assets/omni.svg', 'assets/check.svg', 'windows_ocr.ps1', 'LICENSE', 'THIRD_PARTY_NOTICES.md'))
+            ('assets/omni.svg', 'assets/check.svg', 'omnipdf/windows_ocr.ps1', 'LICENSE', 'THIRD_PARTY_NOTICES.md'))
         if result['frozen']:
             result['resources_ok'] = result['resources_ok'] and (root / 'windows_print' / 'WindowsPrint.exe').is_file()
         with tempfile.TemporaryDirectory(prefix='omnipdf-smoke-') as directory:

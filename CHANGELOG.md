@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.14
+
+- Organize application modules, tests and documentation into dedicated folders.
+- Refresh the project page and visualize the CI/CD workflow.
+
 ## 0.1.13
 
 - Provide document preview in the Windows print dialog when the print host is available.

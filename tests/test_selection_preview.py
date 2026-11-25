@@ -10,7 +10,7 @@ import pymupdf
 from PySide6.QtWidgets import QApplication
 
 from main import Editor
-from pdf_document import PdfDocument
+from omnipdf.pdf_document import PdfDocument
 
 
 class SelectionPreviewTests(unittest.TestCase):

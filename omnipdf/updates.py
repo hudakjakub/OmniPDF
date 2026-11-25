@@ -14,7 +14,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from app_info import VERSION, RELEASE_REPOSITORY
+from .app_info import VERSION, RELEASE_REPOSITORY
 
 API_URL = f"https://api.github.com/repos/{RELEASE_REPOSITORY}/releases/latest"
 MAX_JSON = 1024 * 1024

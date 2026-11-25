@@ -2,12 +2,12 @@ import ctypes
 import unittest
 from unittest.mock import patch
 
-import window_chrome
+from omnipdf import window_chrome
 
 
 class WindowChromeTests(unittest.TestCase):
-    @patch("window_chrome.sys.platform", "win32")
-    @patch("window_chrome.ctypes.WinDLL", create=True)
+    @patch("omnipdf.window_chrome.sys.platform", "win32")
+    @patch("omnipdf.window_chrome.ctypes.WinDLL", create=True)
     def test_title_bar_colors_and_legacy_fallback(self, dll):
         set_attribute = dll.return_value.DwmSetWindowAttribute
         calls = []
@@ -28,28 +28,28 @@ class WindowChromeTests(unittest.TestCase):
         self.assertEqual(set_attribute.restype, ctypes.c_int32)
         dll.assert_called_once_with("dwmapi")
 
-    @patch("window_chrome.sys.platform", "win32")
-    @patch("window_chrome.ctypes.WinDLL", create=True, side_effect=OSError)
+    @patch("omnipdf.window_chrome.sys.platform", "win32")
+    @patch("omnipdf.window_chrome.ctypes.WinDLL", create=True, side_effect=OSError)
     def test_missing_apis_are_safe(self, dll):
         window_chrome.configure_title_bar(123)
         window_chrome.set_app_id()
         self.assertEqual(dll.call_count, 2)
 
-    @patch("window_chrome.sys.platform", "linux")
-    @patch("window_chrome.ctypes.WinDLL", create=True)
+    @patch("omnipdf.window_chrome.sys.platform", "linux")
+    @patch("omnipdf.window_chrome.ctypes.WinDLL", create=True)
     def test_other_platforms_do_nothing(self, dll):
         window_chrome.configure_title_bar(123)
         window_chrome.set_app_id()
         dll.assert_not_called()
 
-    @patch("window_chrome.sys.platform", "win32")
-    @patch("window_chrome.ctypes.WinDLL", create=True)
+    @patch("omnipdf.window_chrome.sys.platform", "win32")
+    @patch("omnipdf.window_chrome.ctypes.WinDLL", create=True)
     def test_app_id(self, dll):
         window_chrome.set_app_id()
         dll.return_value.SetCurrentProcessExplicitAppUserModelID.assert_called_once_with("OmniPDF.Editor")
 
-    @patch('window_chrome.sys.platform', 'win32')
-    @patch('window_chrome.ctypes.WinDLL', create=True)
+    @patch('omnipdf.window_chrome.sys.platform', 'win32')
+    @patch('omnipdf.window_chrome.ctypes.WinDLL', create=True)
     def test_update_mutex_is_held_until_released(self, dll):
         dll.return_value.CreateMutexW.return_value = 123
         handle = window_chrome.create_app_mutex()

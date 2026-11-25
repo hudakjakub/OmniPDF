@@ -10,8 +10,8 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import pymupdf
 from PySide6.QtWidgets import QApplication
 
-from pdf_document import PdfDocument
-from native_print import print_native, run_helper
+from omnipdf.pdf_document import PdfDocument
+from omnipdf.native_print import print_native, run_helper
 
 
 class NativePrintTests(unittest.TestCase):
@@ -43,7 +43,7 @@ class NativePrintTests(unittest.TestCase):
                     self.assertNotEqual(before, document.render(0, 1).samples)
                     self.assertEqual(pymupdf.Pixmap(str(captured['pages'][0])).samples, document.render(0, 300 / 72).samples)
                     return 0
-                with patch('native_print.run_helper', side_effect=run):
+                with patch('omnipdf.native_print.run_helper', side_effect=run):
                     self.assertTrue(print_native(document, Path('helper.exe')))
                 self.assertFalse(captured['folder'].exists())
                 self.assertEqual(captured['title'], source.name)
@@ -62,11 +62,11 @@ class NativePrintTests(unittest.TestCase):
                 def fail(args):
                     captured.append(Path(args[1]))
                     return 2
-                with patch('native_print.run_helper', side_effect=fail):
+                with patch('omnipdf.native_print.run_helper', side_effect=fail):
                     with self.assertRaises(RuntimeError):
                         print_native(document, Path('helper.exe'))
                 self.assertFalse(captured[0].exists())
-                with patch('native_print.run_helper', return_value=1):
+                with patch('omnipdf.native_print.run_helper', return_value=1):
                     self.assertFalse(print_native(document, Path('helper.exe')))
             finally:
                 document.close()

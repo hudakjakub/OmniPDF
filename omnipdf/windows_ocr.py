@@ -2,7 +2,7 @@
 import json
 import subprocess
 from pathlib import Path
-from i18n import _
+from .i18n import _
 
 
 def recognize(image_path: str | Path) -> list[dict]:

@@ -15,8 +15,8 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QPushButton
 
 from main import Editor
-import updates
-from updates import Release
+from omnipdf import updates
+from omnipdf.updates import Release
 
 
 class UpdateUiTests(unittest.TestCase):
@@ -153,7 +153,7 @@ class UpdateUiTests(unittest.TestCase):
         self.window._verified_update = (self.release, self.installer)
         error = updates.UpdateError('Could not start the installer.')
         error.__cause__ = OSError(22, 'blocked', None, 4551)
-        with patch('i18n.language', return_value='en'), \
+        with patch('omnipdf.i18n.language', return_value='en'), \
              patch('main.updates.launch_installer', side_effect=error), \
              patch.object(QMessageBox, 'warning') as warning:
             self.window._launch_update()

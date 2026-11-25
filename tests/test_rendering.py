@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pymupdf
 
-from pdf_document import PdfDocument
+from omnipdf.pdf_document import PdfDocument
 
 
 class RenderingTests(unittest.TestCase):

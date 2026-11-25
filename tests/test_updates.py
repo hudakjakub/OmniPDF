@@ -8,7 +8,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request
 
-import updates
+from omnipdf import updates
 
 
 class UpdateTests(unittest.TestCase):

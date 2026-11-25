@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pymupdf
 
-from pdf_document import PdfDocument
+from omnipdf.pdf_document import PdfDocument
 
 
 class PdfDocumentTests(unittest.TestCase):

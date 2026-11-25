@@ -10,7 +10,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtWidgets import QApplication, QMessageBox
 import pymupdf
 
-from i18n import EN, configure_language, language
+from omnipdf.i18n import EN, configure_language, language
 from main import Editor
 
 
@@ -22,7 +22,7 @@ class LanguageTests(unittest.TestCase):
     def test_system_languages_and_standard_buttons(self):
         for language, open_label, save_label, print_label in [('sk', 'Otvoriť súbor (Ctrl+O)', 'Uložiť', 'Tlačiť (Ctrl+P)'),
                                                                ('en', 'Open file (Ctrl+O)', 'Save', 'Print (Ctrl+P)')]:
-            with self.subTest(language=language), patch('i18n.language', return_value=language):
+            with self.subTest(language=language), patch('omnipdf.i18n.language', return_value=language):
                 configure_language(self.app)
                 window = Editor()
                 box = QMessageBox()
@@ -34,7 +34,7 @@ class LanguageTests(unittest.TestCase):
         configure_language(self.app)
 
     def test_first_system_ui_language_and_fallback(self):
-        with patch('i18n.QLocale') as locale:
+        with patch('omnipdf.i18n.QLocale') as locale:
             for languages, expected in [(['sk-SK', 'en-US'], 'sk'), (['en-US', 'sk-SK'], 'en'), (['de-DE'], 'en'), ([], 'en')]:
                 locale.system.return_value.uiLanguages.return_value = languages
                 self.assertEqual(language(), expected)
@@ -54,7 +54,7 @@ class LanguageTests(unittest.TestCase):
                 pdf.save(path)
             for code, page_label, message, ocr in [('sk', 'Strana 1 z 1', 'Dokument nemá žiadnu stranu.', 'Automatické rozpoznanie'),
                                                     ('en', 'Page 1 of 1', 'The document has no pages.', 'Automatic text recognition')]:
-                with self.subTest(language=code), patch('i18n.language', return_value=code):
+                with self.subTest(language=code), patch('omnipdf.i18n.language', return_value=code):
                     window = Editor()
                     with patch.object(window, '_auto_ocr'):
                         window.show()
@@ -72,7 +72,7 @@ class LanguageTests(unittest.TestCase):
     def test_signed_document_confirmation_in_both_languages(self):
         for code, title, disclaimer in [('sk', 'Digitálne podpísané PDF', 'neoveruje jeho platnosť'),
                                          ('en', 'Digitally signed PDF', 'does not verify its validity')]:
-            with self.subTest(language=code), patch('i18n.language', return_value=code):
+            with self.subTest(language=code), patch('omnipdf.i18n.language', return_value=code):
                 window = Editor()
                 with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.No) as question:
                     self.assertFalse(window._confirm_signed_pdf())
