@@ -1,10 +1,24 @@
 import html
 import os
+from dataclasses import dataclass
+from contextlib import nullcontext
 from pathlib import Path
 from statistics import median
 import tempfile
+from unicodedata import bidirectional, normalize
 
 import pymupdf
+
+
+TEXT_DICT = pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES
+TEXT_CHARS = pymupdf.TEXTFLAGS_RAWDICT & ~pymupdf.TEXT_PRESERVE_IMAGES
+
+
+@dataclass(eq=False, slots=True)
+class PageVersion:
+    ocr: list | None = None
+    needs_ocr: bool | None = None
+    ocr_error: str | None = None
 
 
 class SignedPdfError(ValueError):
@@ -12,15 +26,17 @@ class SignedPdfError(ValueError):
 
 
 class PdfDocument:
+    HISTORY_LIMIT_BYTES = 128 * 1024 * 1024
+
     def __init__(self, path, *, allow_signed=False):
         self.source = Path(path).resolve(strict=True)
+        self._source_stamp = self._file_stamp(self.source)
+        self.searchable_source = False
         self.document = pymupdf.open(self.source)
         try:
             if self.document.needs_pass or self.document.is_encrypted:
                 raise ValueError('Encrypted PDFs are not supported.')
             if self.document.is_pdf:
-                if self.document.is_repaired:
-                    raise ValueError('The PDF is damaged and required repair.')
                 if self.document.permissions != -1 and not (self.document.permissions & pymupdf.PDF_PERM_MODIFY):
                     raise ValueError('This PDF does not permit editing.')
                 if not allow_signed:
@@ -38,6 +54,9 @@ class PdfDocument:
                 self.document = pymupdf.open('pdf', data)
             if not self.document.page_count:
                 raise ValueError('The document has no pages.')
+            self.recovered = self.document.is_repaired
+            if self.recovered:
+                self._verify_recovery()
         except Exception:
             self.document.close()
             raise
@@ -46,6 +65,18 @@ class PdfDocument:
         self._last_replace = None
         self._revision = object()
         self._saved_revision = self._revision
+        self.page_versions = [PageVersion() for _ in self.document]
+
+    def _verify_recovery(self):
+        count = self.page_count
+        try:
+            self._restore(self._snapshot())
+            if self.document.is_repaired or count != self.page_count:
+                raise ValueError('The recovered page count or PDF structure is invalid.')
+            for page in self.document:
+                page.get_displaylist()
+        except Exception as exc:
+            raise ValueError('The PDF could not be recovered.') from exc
 
     @property
     def dirty(self):
@@ -74,35 +105,114 @@ class PdfDocument:
 
     def _restore(self, data):
         empty = data.startswith(b'empty-pdf:')
+        restored = pymupdf.open('pdf', data[10:] if empty else data)
         self.document.close()
-        self.document = pymupdf.open('pdf', data[10:] if empty else data)
+        self.document = restored
         if empty:
             self.document.delete_page(0)
+
+    def _capture(self):
+        return self._snapshot(), self._revision, self.page_versions.copy()
+
+    def _restore_state(self, state):
+        data, self._revision, versions = state
+        self._restore(data)
+        self.page_versions = versions.copy()
+
+    def _record(self, before, page_index=None):
+        if page_index is not None:
+            self.page_versions[page_index] = PageVersion()
+        self._undo.append(before)
+        self._redo.clear()
+        self._trim_history(self._undo)
+        self._revision = object()
+        self._last_replace = None
+
+    def _trim_history(self, latest):
+        total = sum(len(state[0]) for history in (self._undo, self._redo) for state in history)
+        # Keep the most recent step even if one document exceeds the byte budget.
+        while total > self.HISTORY_LIMIT_BYTES and len(self._undo) + len(self._redo) > 1:
+            history = self._undo if self._undo and (latest is self._redo or len(self._undo) > 1) else self._redo
+            total -= len(history.pop(0)[0])
 
     def _change_pages(self, page_index, operation, *, allow_empty=False):
         if not isinstance(page_index, int) or not (0 <= page_index < self.page_count or allow_empty and self.page_count == 0 and page_index == -1):
             raise ValueError('Select a valid page.')
-        before = self._snapshot()
-        revision = self._revision
+        before = self._capture()
+        versions = {self.document.page_xref(index): version for index, version in enumerate(self.page_versions)}
         try:
             operation()
         except Exception:
-            self._restore(before)
+            self._restore_state(before)
             raise
-        self._undo.append((before, revision))
-        self._redo.clear()
-        self._revision = object()
-        self._last_replace = None
+        self.page_versions = [versions.get(self.document.page_xref(index)) or PageVersion()
+                              for index in range(self.page_count)]
+        self._record(before)
 
     def delete_page(self, page_index):
-        self._change_pages(page_index, lambda: self.document.delete_page(page_index))
+        self.delete_pages([page_index])
+
+    def _selected_pages(self, indices):
+        indices = list(indices)
+        if not indices or not all(isinstance(i, int) and 0 <= i < self.page_count for i in indices):
+            raise ValueError('Select a valid page.')
+        return sorted(set(indices))
+
+    def delete_pages(self, indices):
+        indices = self._selected_pages(indices)
+        self._change_pages(indices[0], lambda: self.document.delete_pages(indices))
+
+    def rotate_pages(self, indices, angle):
+        indices = self._selected_pages(indices)
+        if angle not in (-90, 90):
+            raise ValueError('Page rotation must be 90 degrees clockwise or counterclockwise.')
+        def rotate():
+            for index in indices:
+                page = self.document[index]
+                page.set_rotation((page.rotation + angle) % 360)
+        self._change_pages(indices[0], rotate)
+        for index in indices:
+            version = self.page_versions[index]
+            self.page_versions[index] = PageVersion(ocr=version.ocr or None, needs_ocr=version.needs_ocr)
+
+    def move_pages(self, indices, boundary):
+        indices = self._selected_pages(indices)
+        if not isinstance(boundary, int) or not 0 <= boundary <= self.page_count:
+            raise ValueError('Select a valid page.')
+        selected = set(indices)
+        order = [index for index in range(self.page_count) if index not in selected]
+        destination = boundary - sum(index < boundary for index in indices)
+        order[destination:destination] = indices
+        if order != list(range(self.page_count)):
+            self._change_pages(indices[0], lambda: self.document.select(order))
+        return destination
 
     def duplicate_page(self, page_index):
         def duplicate():
+            links = self.document[page_index].get_links()
+            destination = page_index + 1
             with pymupdf.open('pdf', self.document.tobytes()) as source:
                 self.document.insert_pdf(source, from_page=page_index, to_page=page_index,
-                                         start_at=page_index + 1, annots=True, widgets=True)
+                                         start_at=destination, annots=True, widgets=True)
+            page = self.document[destination]
+            for link in links:
+                target = link.get('page', -1)
+                if (link['kind'] == pymupdf.LINK_GOTO and isinstance(target, int)
+                        and 0 <= target < self.page_count - 1 and target != page_index):
+                    # insert_pdf copies self-links and external links, while dropping links outside the copied range.
+                    link.pop('xref', None)
+                    link.pop('id', None)
+                    link['page'] = target + (target >= destination)
+                    page.insert_link(link)
         self._change_pages(page_index, duplicate)
+
+    def move_page(self, source, destination):
+        if not all(isinstance(i, int) and 0 <= i < self.page_count for i in (source, destination)):
+            raise ValueError('Select a valid page.')
+        if source == destination:
+            return
+        before = destination + (source < destination)
+        self._change_pages(source, lambda: self.document.move_page(source, before if before < self.page_count else -1))
 
     def insert_pdf(self, path, after_page_index, *, allow_signed=False):
         with pymupdf.open(path) as check:
@@ -117,24 +227,70 @@ class PdfDocument:
 
     def spans(self, page_index):
         result = []
-        for block in self.document[page_index].get_text('dict')['blocks']:
+        for block in self.document[page_index].get_text('dict', flags=TEXT_DICT)['blocks']:
             for line in block.get('lines', ()):
                 for span in line['spans']:
-                    if span['text'].strip():
+                    if span['text'].strip() and span.get('alpha', 255):
                         result.append({key: span[key] for key in ('text', 'bbox', 'size', 'color', 'origin')})
         return result
 
-    def characters(self, page_index):
+    def characters(self, page_index, clip=None, *, include_hidden=False):
         result = []
         line_id = 0
-        for block in self.document[page_index].get_text('rawdict')['blocks']:
+        for block in self.document[page_index].get_text('rawdict', clip=clip, flags=TEXT_CHARS)['blocks']:
             for line in block.get('lines', ()):
                 for span in line['spans']:
+                    if not include_hidden and not span.get('alpha', 255):
+                        continue
                     for char in span['chars']:
                         result.append({'text': char['c'], 'bbox': char['bbox'],
                                        'origin': char['origin'], 'line': line_id})
                 line_id += 1
         return result
+
+    def find_text(self, page_index, query):
+        needle = ' '.join(normalize('NFKD', query).casefold().split())
+        if not needle:
+            return []
+        page = self.document[page_index]
+        blocks = page.get_text('rawdict', flags=pymupdf.TEXTFLAGS_SEARCH)['blocks']
+        text, positions = [], []
+        line_number = 0
+        for block in blocks:
+            for line in block.get('lines', ()):
+                dx, dy = line['dir']
+                for span in line['spans']:
+                    for char in span['chars']:
+                        x, y = char['origin']
+                        # A dehyphenated line can still occupy multiple baselines on the page.
+                        baseline = round(y * dx - x * dy, 1)
+                        for unit in normalize('NFKD', char['c']).casefold():
+                            if not unit.isspace():
+                                text.append(unit)
+                                positions.append(((line_number, baseline), char['bbox']))
+                            elif text and text[-1] != ' ':
+                                text.append(' ')
+                                positions.append(None)
+                if text and text[-1] != ' ':
+                    text.append(' ')
+                    positions.append(None)
+                line_number += 1
+        haystack = ''.join(text)
+        hits = []
+        start = haystack.find(needle)
+        while start >= 0:
+            end = start + len(needle)
+            fragments = {}
+            for position in positions[start:end]:
+                if position is not None:
+                    line, box = position
+                    if line in fragments:
+                        fragments[line].include_rect(pymupdf.Rect(box))
+                    else:
+                        fragments[line] = pymupdf.Rect(box)
+            hits.append(tuple(tuple(rect) for rect in fragments.values()))
+            start = haystack.find(needle, end)
+        return hits
 
     def delete_characters(self, page_index, characters):
         page = self.document[page_index]
@@ -163,20 +319,15 @@ class PdfDocument:
             if any(redaction.intersects(pymupdf.Rect(other['bbox'])) for other in remaining):
                 raise ValueError('The selected area overlaps neighboring text.')
             rectangles.append(redaction)
-        before = self.document.tobytes()
-        revision = self._revision
+        before = self._capture()
         try:
             for rect in rectangles:
                 page.add_redact_annot(rect, fill=False)
             page.apply_redactions(images=0, graphics=0, text=0)
         except Exception:
-            self.document.close()
-            self.document = pymupdf.open('pdf', before)
+            self._restore_state(before)
             raise
-        self._undo.append((before, revision))
-        self._redo.clear()
-        self._revision = object()
-        self._last_replace = None
+        self._record(before, page_index)
 
     def render(self, page_index, scale=1.5, clip=None):
         page = self.document[page_index]
@@ -204,17 +355,8 @@ class PdfDocument:
             xref = int(value.split()[0]) if kind == 'xref' else None
         return bool(widget.field_value)
 
-    def cover_region(self, page_index, bbox, destination=None):
-        page = self.document[page_index]
-        rect = pymupdf.Rect(bbox)
-        if rect.is_empty or rect.is_infinite or not (page.rect * page.derotation_matrix).contains(rect):
-            raise ValueError('Select a valid area inside the page.')
-        if destination is not None:
-            target = pymupdf.Rect(destination)
-            if target.is_empty or target.is_infinite or not (page.rect * page.derotation_matrix).contains(target):
-                raise ValueError('Select a valid area inside the page.')
-        if any(annot.type[0] == pymupdf.PDF_ANNOT_REDACT for annot in (page.annots() or ())):
-            raise ValueError('Strana obsahuje existujúce redakcie. Pred úpravou ich odstráňte alebo použite inú kópiu.')
+    @staticmethod
+    def _sample_background(page, rect):
         scale = 1.5
         clip = (rect + (-4, -4, 4, 4)) * page.rotation_matrix
         pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), clip=clip, alpha=False, annots=False)
@@ -230,65 +372,64 @@ class PdfDocument:
                     if 0 <= px < pix.width and 0 <= py < pix.height:
                         samples.append(pix.pixel(px, py)[:3])
         # shortcut: nonuniform backgrounds get a flat color; use inpainting for photo-like areas.
-        color = tuple(median(channel) / 255 for channel in zip(*samples)) if samples else (1, 1, 1)
-        before = self.document.tobytes()
-        revision = self._revision
+        return tuple(median(channel) / 255 for channel in zip(*samples)) if samples else (1, 1, 1)
+
+    def cover_region(self, page_index, bbox, destination=None):
+        page = self.document[page_index]
+        rect = pymupdf.Rect(bbox)
+        if rect.is_empty or rect.is_infinite or not (page.rect * page.derotation_matrix).contains(rect):
+            raise ValueError('Select a valid area inside the page.')
+        if destination is not None:
+            target = pymupdf.Rect(destination)
+            if target.is_empty or target.is_infinite or not (page.rect * page.derotation_matrix).contains(target):
+                raise ValueError('Select a valid area inside the page.')
+        if any(annot.type[0] == pymupdf.PDF_ANNOT_REDACT for annot in (page.annots() or ())):
+            raise ValueError('Strana obsahuje existujúce redakcie. Pred úpravou ich odstráňte alebo použite inú kópiu.')
+        color = self._sample_background(page, rect)
+        before = self._capture()
         try:
             page.add_redact_annot(rect, fill=color)
             page.apply_redactions(images=2, graphics=0, text=0)
             if destination is not None:
-                with pymupdf.open('pdf', before) as source:
+                with pymupdf.open('pdf', before[0]) as source:
                     source[page_index].set_rotation(0)
                     image = source[page_index].get_pixmap(matrix=pymupdf.Matrix(3, 3), clip=rect, alpha=False, annots=False)
                     page.insert_image(target, stream=image.tobytes('png'), keep_proportion=False, overlay=True)
         except Exception:
-            self.document.close()
-            self.document = pymupdf.open('pdf', before)
+            self._restore_state(before)
             raise
-        self._undo.append((before, revision))
-        self._redo.clear()
-        self._revision = object()
-        self._last_replace = None
+        self._record(before, page_index)
         return color
 
     def transform_region(self, page_index, bbox, destination, baseline):
-        current = self.document.tobytes()
-        revision = self._revision
+        current = self._capture()
         self._restore(baseline)
         try:
             if destination is not None and pymupdf.Rect(bbox) == pymupdf.Rect(destination):
-                self._undo.append((current, revision))
-                self._redo.clear()
-                self._revision = object()
-                self._last_replace = None
+                self._record(current, page_index)
             else:
                 self.cover_region(page_index, bbox, destination)
-                self._undo[-1] = (current, revision)
+                self._undo[-1] = current
+                self._trim_history(self._undo)
         except Exception:
-            self._restore(current)
-            self._revision = revision
+            self._restore_state(current)
             raise
 
-    def replace_text(self, page_index, bbox, text, fontsize=11, color=0, background=True, *, update_previous=False, insert_only=False):
+    def replace_text(self, page_index, bbox, text, fontsize=11, color=0, background=False, *, update_previous=False, insert_only=False):
         if update_previous:
             if (not self._undo or not self._last_replace
                     or self._last_replace[0] is not self._undo[-1]
                     or self._last_replace[1:] != (page_index, tuple(bbox), insert_only)):
                 raise ValueError('There is no previous edit to update.')
-            current = self.document.tobytes()
-            revision = self._revision
-            original, original_revision = self._undo[-1]
-            self.document.close()
-            self.document = pymupdf.open('pdf', original)
-            self._revision = original_revision
+            current = self._capture()
+            original = self._undo.pop()
             try:
+                self._restore_state(original)
                 self.replace_text(page_index, bbox, text, fontsize, color, background, insert_only=insert_only)
             except Exception:
-                self.document.close()
-                self.document = pymupdf.open('pdf', current)
-                self._revision = revision
+                self._restore_state(current)
+                self._undo.append(original)
                 raise
-            del self._undo[-2]
             return
         page = self.document[page_index]
         rect = pymupdf.Rect(bbox)
@@ -297,15 +438,28 @@ class PdfDocument:
         if not isinstance(text, str) or fontsize <= 0:
             raise ValueError('Enter valid text and font size.')
         redaction = pymupdf.Rect(rect)
-        native = None if insert_only else next((span for block in page.get_text('dict')['blocks'] for line in block.get('lines', ()) for span in line['spans'] if pymupdf.Rect(span['bbox']) == rect), None)
+        native, direction = (None, None) if insert_only else next(
+            ((span, line['dir']) for block in page.get_text('dict', flags=TEXT_DICT)['blocks']
+             for line in block.get('lines', ()) for span in line['spans']
+             if span.get('alpha', 255) and pymupdf.Rect(span['bbox']) == rect), (None, None))
+        over_image = not insert_only and any(
+            rect.intersects(pymupdf.Rect(image['bbox'])) for image in page.get_image_info())
+        rotation = 0
         if native:
-            if any(rect.intersects(pymupdf.Rect(image['bbox'])) for image in page.get_image_info()):
+            if over_image:
                 raise ValueError('Text je nad obrázkom. Zakryte ho ikonou obdĺžnika a pridajte nový text ikonou T.')
-            redaction.y0 += rect.height * 0.25
-            redaction.y1 -= rect.height * 0.25
+            rotation = {(1, 0): 0, (0, -1): 90, (-1, 0): 180, (0, 1): 270}.get(tuple(round(value, 6) for value in direction))
+            if rotation is None:
+                raise ValueError('Text at this angle cannot be edited directly.')
+            if rotation in (90, 270):
+                redaction.x0 += rect.width * 0.25
+                redaction.x1 -= rect.width * 0.25
+            else:
+                redaction.y0 += rect.height * 0.25
+                redaction.y1 -= rect.height * 0.25
         allowed = rect + (-0.05, -0.05, 0.05, 0.05)
         if not insert_only:
-            for block in page.get_text('rawdict')['blocks']:
+            for block in page.get_text('rawdict', flags=TEXT_CHARS)['blocks']:
                 for line in block.get('lines', ()):
                     for span in line['spans']:
                         for char in span['chars']:
@@ -314,75 +468,162 @@ class PdfDocument:
                                 raise ValueError('The selected area overlaps neighboring text.')
         if not insert_only and any(annot.type[0] == pymupdf.PDF_ANNOT_REDACT for annot in (page.annots() or ())):
             raise ValueError('Strana obsahuje existujúce redakcie. Pred úpravou ich odstráňte alebo použite inú kópiu.')
-        before = self.document.tobytes()
-        revision = self._revision
+        font = None
+        fallback = False
+        if text and native and '\n' not in text:
+            # shortcut: replacement uses Segoe UI rather than the original font, use font matching when exact typography is required.
+            suffix = 'z' if native['flags'] & 18 == 18 else ('b' if native['flags'] & 16 else ('i' if native['flags'] & 2 else ''))
+            fontfile = str(Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts' / f'segoeui{suffix}.ttf')
+            font = pymupdf.Font(fontfile=fontfile)
+            fallback = any(not font.has_glyph(ord(char), fallback=False) for char in text)
+        before = self._capture()
         try:
             if not insert_only:
-                page.add_redact_annot(redaction, fill=(1, 1, 1) if background else False)
-                page.apply_redactions(images=2, graphics=0, text=0)
+                fill = (1, 1, 1) if background else False
+                if over_image and not background:
+                    fill = self._sample_background(page, redaction)
+                page.add_redact_annot(redaction, fill=fill)
+                page.apply_redactions(images=2 if over_image else 0, graphics=0, text=0)
+                if native and any(char['text'].strip() and redaction.intersects(pymupdf.Rect(char['bbox']))
+                                  for char in self.characters(page_index, clip=allowed, include_hidden=True)):
+                    raise ValueError('The original text could not be removed safely.')
             if text:
                 rgb = '#%06x' % (color & 0xffffff)
                 content = html.escape(text).replace('\n', '<br>')
-                # shortcut: replacement uses Segoe UI rather than the original font, use font matching when exact typography is required.
-                if native and '\n' not in text:
-                    suffix = 'z' if native['flags'] & 18 == 18 else ('b' if native['flags'] & 16 else ('i' if native['flags'] & 2 else ''))
-                    fontfile = str(Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts' / f'segoeui{suffix}.ttf')
-                    font = pymupdf.Font(fontfile=fontfile)
+                if font is not None and not fallback:
                     width = font.text_length(text, fontsize=fontsize)
-                    fitted = min(fontsize, native['size'], fontsize * rect.width / width) if width else min(fontsize, native['size'])
+                    available = rect.height if rotation in (90, 270) else rect.width
+                    fitted = min(fontsize, native['size'], fontsize * available / width) if width else min(fontsize, native['size'])
                     if fitted < fontsize * 0.7:
                         raise ValueError('The replacement text does not fit in the selected area.')
                     page.insert_font(fontname='editor' + (suffix or 'regular'), fontfile=fontfile)
-                    page.insert_text(native['origin'], text, fontsize=fitted, fontname='editor' + (suffix or 'regular'), color=tuple(int(rgb[i:i+2], 16) / 255 for i in (1, 3, 5)))
+                    inserted = page.insert_text(native['origin'], text, fontsize=fitted, rotate=rotation,
+                                                fontname='editor' + (suffix or 'regular'), color=tuple(int(rgb[i:i+2], 16) / 255 for i in (1, 3, 5)))
+                    if inserted < 1:
+                        raise ValueError('The replacement text does not fit in the selected area.')
                 else:
-                    spare, _ = page.insert_htmlbox(rect, content, css=f'body, p {{ margin: 0; padding: 0; line-height: 1; }} * {{ font-family: sans-serif; font-size: {fontsize}pt; color: {rgb}; }}', scale_low=0.7)
+                    spare, _ = page.insert_htmlbox(rect, content, css=f'body, p {{ margin: 0; padding: 0; line-height: 1; }} * {{ font-family: sans-serif; font-size: {fontsize}pt; color: {rgb}; }}', scale_low=0.7, rotate=rotation)
                     if spare < 0:
                         raise ValueError('The replacement text does not fit in the selected area.')
+                    if fallback and normalize('NFC', ''.join(text.split())) != normalize('NFC', ''.join(page.get_textbox(rect).split())):
+                        raise ValueError('Some characters in the replacement text cannot be rendered.')
         except Exception:
-            self.document.close()
-            self.document = pymupdf.open('pdf', before)
+            self._restore_state(before)
             raise
-        self._undo.append((before, revision))
-        self._redo.clear()
-        self._revision = object()
+        self._record(before, page_index)
         self._last_replace = (self._undo[-1], page_index, tuple(rect), insert_only)
 
     def undo(self):
         if not self._undo:
             return False
-        self._redo.append((self._snapshot(), self._revision))
+        self._redo.append(self._capture())
         self._last_replace = None
-        data, self._revision = self._undo.pop()
-        self._restore(data)
+        self._restore_state(self._undo.pop())
+        self._trim_history(self._redo)
         return True
 
     def redo(self):
         if not self._redo:
             return False
-        self._undo.append((self._snapshot(), self._revision))
+        self._undo.append(self._capture())
         self._last_replace = None
-        data, self._revision = self._redo.pop()
-        self._restore(data)
+        self._restore_state(self._redo.pop())
+        self._trim_history(self._undo)
         return True
 
-    def save_copy(self, path):
+    @staticmethod
+    def _file_stamp(path):
+        stat = path.stat()
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+
+    def _add_searchable_text(self, document):
+        font = pymupdf.Font('helv')
+        for index, version in enumerate(self.page_versions):
+            if not version.ocr:
+                continue
+            page = document[index]
+            rotation = page.rotation
+            # TextWriter places text in unrotated page coordinates.
+            page.set_rotation(0)
+            try:
+                self._write_searchable_page(page, version.ocr, font)
+            finally:
+                page.set_rotation(rotation)
+
+    @staticmethod
+    def _write_searchable_page(page, lines, font):
+        bounds = page.rect
+        before = page.get_textpage()
+        writers = {}
+        added = []
+        for line in lines:
+            rect = pymupdf.Rect(line['bbox']) & bounds
+            content = ' '.join(line['text'].split())
+            if rect.is_empty or not content:
+                continue
+            expected = normalize('NFC', ''.join(content.split()))
+            if expected in normalize('NFC', ''.join(page.get_textbox(rect, textpage=before).split())):
+                continue
+            angle = line.get('rotation', 0)
+            if any(bidirectional(char) in ('R', 'AL', 'AN') for char in content):
+                css = f'body,p {{margin:0;padding:0;line-height:1}} * {{font-size:{line["size"]}pt}}'
+                spare, _ = page.insert_htmlbox(rect, html.escape(content), css=css, scale_low=0,
+                                               opacity=0, rotate=angle)
+                if spare < 0:
+                    raise ValueError('Some recognized text could not be saved as searchable text.')
+            else:
+                if angle not in writers:
+                    writers[angle] = pymupdf.TextWriter(bounds)
+                box = rect * pymupdf.Matrix(angle)
+                padding = min(0.15, box.width / 4, box.height / 4)
+                width = font.text_length(content, fontsize=1)
+                size = min(line['size'], (box.width - 2 * padding) / max(width, 1),
+                           (box.height - 2 * padding) / (font.ascender - font.descender))
+                writers[angle].append((box.x0 + padding, box.y0 + padding + font.ascender * size),
+                                      content, font=font, fontsize=size)
+            added.append((rect, expected))
+        for angle, writer in writers.items():
+            writer.write_text(page, morph=(pymupdf.Point(0, 0), pymupdf.Matrix(angle)), opacity=0, render_mode=3)
+        after = page.get_textpage()
+        for rect, expected in added:
+            if expected not in normalize('NFC', ''.join(page.get_textbox(rect, textpage=after).split())):
+                raise ValueError('Some recognized text could not be saved as searchable text.')
+
+    def save_copy(self, path, *, replace_source=False, searchable=False):
         if not self.page_count:
             raise ValueError('The document has no pages.')
         target = Path(path).resolve()
-        if target == self.source or (target.exists() and os.path.samefile(target, self.source)):
+        same_path = target == self.source
+        replacing = replace_source and same_path and self.source.suffix.casefold() == '.pdf'
+        searchable = searchable or (replacing and self.searchable_source)
+        if not replacing and (same_path or (target.exists() and self.source.exists() and os.path.samefile(target, self.source))):
             raise ValueError('The original file cannot be overwritten.')
-        if target.exists():
+        if target.exists() and not replacing:
             raise FileExistsError('Choose a new output file; existing files cannot be overwritten.')
         fd, temp = tempfile.mkstemp(prefix='.pdf-editor-', suffix='.pdf', dir=target.parent)
         os.close(fd)
         try:
-            self.document.save(temp, garbage=3, deflate=True)
+            with (pymupdf.open('pdf', self._snapshot()) if searchable else nullcontext(self.document)) as output:
+                if searchable:
+                    self._add_searchable_text(output)
+                output.save(temp, garbage=3, deflate=True)
             with pymupdf.open(temp) as check:
                 if check.is_repaired or check.page_count != self.page_count:
                     raise ValueError('The saved PDF could not be verified.')
                 for page in check:
                     page.get_text()
-            if os.name == 'nt':
+            if replacing:
+                # MuPDF can hold the original open on Windows. Keep the live document in memory before the swap.
+                if self.document.name:
+                    self._restore(self._snapshot())
+                with open(temp, 'r+b') as staged:
+                    os.fsync(staged.fileno())
+                if not target.exists() or self._file_stamp(target) != self._source_stamp:
+                    raise ValueError('The original PDF changed on disk. Save a copy or reopen the file.')
+                os.replace(temp, target)
+                self._source_stamp = self._file_stamp(target)
+                self.searchable_source = searchable
+            elif os.name == 'nt':
                 os.rename(temp, target)
             else:
                 os.link(temp, target)

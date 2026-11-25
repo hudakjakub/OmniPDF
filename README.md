@@ -42,17 +42,21 @@ Kompaktný klasický panel spája všetko do jedného riadka: názov dokumentu a
    Hore v paneli sa zobrazí zväčšený výrez vybraného textu s jeho okolím. Veľkosť písma sa vyberá z malého zoznamu; pôvodná neštandardná veľkosť zostáva dostupná.
 3. Časť textu označte ťahaním myši a stlačte **Delete**. Kliknutie vyberie celý úsek. **Escape** zruší označenie, rozkreslenú oblasť aj aktívny nástroj na pridanie textu alebo zakrývanie. V textovom poli Delete funguje ako pri bežnom písaní.
    Posúvanie na inú stranu zachová výber aj rozpísaný text. Delete a úpravy v pravom paneli sa vzťahujú na pôvodne označenú stranu.
-4. Text zo skenov a fotografií sa rozpozná automaticky po otvorení strany, ktorá nemá textovú vrstvu. Tlačidlo OCR netreba.
+4. Text zo skenov a fotografií sa rozpoznáva automaticky na pozadí. Počas rozpoznávania môžete prechádzať dokumentom aj upravovať iné strany. Späť a Dopredu obnovia aj rozpoznaný text.
 5. Ikonou **T** pridajte textové pole: kliknutím vložíte predvolené pole alebo ťahaním určíte jeho veľkosť. Potom môžete hneď písať. Nový text sa vloží nad pôvodný obsah. Ikonou prerušovaného obdĺžnika vyberte oblasť, ktorú môžete presunúť, zmeniť jej veľkosť alebo odstrániť klávesom Delete.
 6. Strany sú zobrazené súvislo pod sebou. Kolieskom alebo posuvníkom prechádzate celým PDF; číslo strany a vybraná miniatúra sa prispôsobujú najviac viditeľnej strane. Šípky uprostred horného riadka alebo kliknutie na miniatúru preskočia na začiatok strany. Text možno upravovať kliknutím na ktorúkoľvek viditeľnú stranu.
    **Na šírku** prispôsobí najširšiu stranu dokumentu vrátane okrajov; prispôsobenie sa zachová pri zmene veľkosti okna až do ručného zväčšenia. Vo vyššom rozlíšení sa načítavajú viditeľné strany a ich najbližšie okolie. Prázdne podpisové pole sa v náhľade nezobrazuje ako „SIGN“.
-   Vľavo sa vždy zobrazujú vycentrované miniatúry všetkých strán, aj v úzkom okne. Kliknutím na miniatúru prejdete na príslušnú stranu.
+   Vľavo sa zobrazujú miniatúry strán. Pomocou **Ctrl+kliknutie** vyberiete jednotlivé strany a pomocou **Shift+kliknutie** celý rozsah. Výber presuniete potiahnutím miniatúr. V ponuke **Spravovať strany** môžete vybrané strany presunúť, otočiť alebo odstrániť naraz a zmenu vrátiť pomocou **Ctrl+Z**.
    Za poslednou stranou je karta **+** s prerušovaným rámom. Kliknutím vyberte ďalšie PDF alebo ho pretiahnite na kartu; všetky jeho strany sa pridajú na koniec otvoreného dokumentu.
-   Malé **×** pri miniatúre odstráni príslušnú stranu; ikona dvoch listov ju duplikuje. Ikona listov **Spravovať strany** hore otvorí tieto akcie aj vloženie všetkých strán ďalšieho PDF za aktuálnu stranu. Rovnaká ponuka je dostupná pravým tlačidlom na miniatúre. Poslednú stranu nemožno odstrániť. Aj tieto úpravy podporujú Späť/Dopredu a zapisujú sa až pri uložení kópie.
-7. Ikona zakrivenej šípky doľava / **Ctrl+Z** vráti zmenu, šípka doprava / **Ctrl+Y** alebo **Ctrl+Shift+Z** ju zopakuje. Nová úprava po návrate zahodí predchádzajúcu vetvu Dopredu. Opakované písanie v tom istom vybranom úseku tvorí jeden krok späť.
-8. PDF kópiu uložte tlačidlom **Uložiť kópiu**, pomocou **Ctrl+S** alebo **Ctrl+Shift+S**. Automaticky sa mení náhľad; zápis PDF na disk zostáva na tomto tlačidle. Existujúci súbor nemožno prepísať.
+   Malé **×** pri miniatúre odstráni príslušnú stranu. Ikona dvoch listov ju duplikuje. Ikona listov **Spravovať strany** hore otvorí tieto akcie aj vloženie všetkých strán ďalšieho PDF za aktuálnu stranu. Rovnaká ponuka je dostupná pravým tlačidlom na miniatúre. Kópiu môžete uložiť, keď má dokument aspoň jednu stranu. Zmeny poradia, duplikovanie, vkladanie aj mazanie strán podporujú Späť a Dopredu.
+7. Ikona zakrivenej šípky doľava / **Ctrl+Z** vráti zmenu, šípka doprava / **Ctrl+Y** alebo **Ctrl+Shift+Z** ju zopakuje. Nová úprava po návrate zahodí predchádzajúcu vetvu Dopredu. Opakované písanie v tom istom vybranom úseku tvorí jeden krok späť. História má rozpočet 128 MiB na dokument. Posledný krok ostáva dostupný aj pri väčšom súbore.
+8. Výsledok uložte tlačidlom **Uložiť PDF**, pomocou **Ctrl+S** alebo **Ctrl+Shift+S**. Vyberte nový názov pre kópiu alebo vyberte pôvodný súbor PDF a potvrďte nahradenie. Aplikácia pred nahradením pripraví a overí PDF. Ak sa originál medzičasom zmenil na disku, uložte kópiu alebo súbor znova otvorte.
 
-Klávesové skratky: **Ctrl+O** otvorí súbor, **Ctrl+S** alebo **Ctrl+Shift+S** uloží kópiu, **Ctrl+Z** vráti úpravu, **Ctrl+Y** alebo **Ctrl+Shift+Z** ju zopakuje. **Ctrl++** alebo **Ctrl+=** priblíži dokument, **Ctrl+-** ho oddiali a **Ctrl+0** prispôsobí šírke okna. **Escape** zruší výber a **Delete** vymaže obsah vybraný na strane; pri písaní v textovom poli fungujú bežné skratky pre text.
+   V ponuke pod logom je **Uložiť ako prehľadávateľné PDF…**. Aplikácia rozpozná text aj na neotvorených skenoch a pridá do PDF neviditeľnú textovú vrstvu. Vzhľad strán ostane rovnaký a text sa dá vyhľadávať aj v iných PDF prehliadačoch.
+
+**Ctrl+F** otvorí hľadanie v celom dokumente. Výsledky na skenoch pribúdajú po rozpoznaní textu a zvýraznia sa celé zodpovedajúce riadky. **Enter** alebo **F3** prejde na ďalší výsledok, **Shift+F3** na predchádzajúci. **Escape** zavrie hľadanie.
+
+**Ctrl+O** otvorí súbor, **Ctrl+S** alebo **Ctrl+Shift+S** otvorí uloženie PDF, **Ctrl+Z** vráti úpravu, **Ctrl+Y** alebo **Ctrl+Shift+Z** ju zopakuje. **Ctrl++** alebo **Ctrl+=** priblíži dokument, **Ctrl+-** ho oddiali a **Ctrl+0** prispôsobí šírke okna. **Escape** zruší výber a **Delete** vymaže obsah vybraný na strane. Pri písaní v textovom poli fungujú bežné skratky pre text.
 
 ## Obmedzenia
 
@@ -70,7 +74,7 @@ Klávesové skratky: **Ctrl+O** otvorí súbor, **Ctrl+S** alebo **Ctrl+Shift+S*
 .venv\Scripts\python.exe -m unittest -v
 ```
 
-Test skutočného Windows OCR sa zapína premennou prostredia `RUN_WINDOWS_OCR=1`. Testy rozhrania bežia bez zobrazovania okien.
+Test skutočného Windows OCR sa lokálne zapína premennou prostredia `RUN_WINDOWS_OCR=1`. GitHub Actions pripraví anglický jazyk OCR a spustí tento test aj rozpoznávanie ukážkového skenu v zabalených aplikáciách. Testy rozhrania bežia bez zobrazovania okien.
 
 ## Aktualizácie
 
@@ -98,7 +102,7 @@ Lokálny Windows build vyžaduje Python 3.14 x64 a Inno Setup 6. Cestu ku kompil
 .venv\Scripts\python.exe scripts\build_windows.py
 ```
 
-Výsledky sú v `release/`. Kontrola zabalených zdrojov, Qt a PDF enginu sa dá spustiť cez `OmniPDF.exe --smoke-test --output smoke.json`.
+Výsledky sú v `release/`. Kontrola zabalených zdrojov, Qt, PDF enginu a Windows OCR sa dá spustiť cez `OmniPDF.exe --smoke-test --output smoke.json`.
 
 ## Licencia
 

@@ -189,12 +189,12 @@ class DragDropTests(unittest.TestCase):
         self.window.select_text(self.window.pdf.spans(0)[0])
         self.window.text.setPlainText('INVOICE 54321')
         self.window.auto_apply_timer.stop()
-        with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Cancel):
+        with patch.object(QMessageBox, 'exec', return_value=QMessageBox.StandardButton.Cancel):
             self.drop(self.window.view.viewport(), [self.local(self.target)])
         self.assertEqual(self.window.pdf.source, self.source)
         self.assertEqual(self.window.text.toPlainText(), 'INVOICE 54321')
         self.assertTrue(self.window.pending)
-        with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Discard):
+        with patch.object(QMessageBox, 'exec', return_value=QMessageBox.StandardButton.Discard):
             self.drop(self.window.view.viewport(), [self.local(self.target)])
         self.assertEqual(self.window.pdf.source, self.target)
 

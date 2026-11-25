@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.10
+
+- Select multiple thumbnails to move, rotate, or delete pages in one undoable step.
+- Save a searchable PDF with an invisible OCR layer for scanned pages.
+- Replace the original PDF after confirmation, with verification and a check for external changes.
+- Open PDFs with recoverable structural errors without changing the original file.
+- Show Find in a compact top-right panel.
+- Show one insertion marker per thumbnail gap and animate reordered thumbnails.
+- Preserve the background by default when replacing text, with a white fill available as an option.
+- Slide the text editor in from the right when a text edit is selected.
+
+## 0.1.9
+
+- Update the PDF engine to MuPDF 1.28.2 with the fix for CVE-2026-3308.
+- Preserve replacement characters, vertical text direction, and links on duplicated pages.
+- Add undoable page reordering, bounded undo history, and background OCR that survives Undo and Redo.
+- Add document Find for text and scans, with one result per wrapped phrase and a notice for incomplete searches.
+- Reuse unchanged thumbnails and test actual OCR in the packaged Windows app.
+
 ## 0.1.8
 
 - Publish stable download names while retaining a compatible installer for older updaters.

@@ -21,7 +21,12 @@ jobs:
           python-version: '3.14'
           architecture: x64
       - run: python -m pip install -r requirements.txt -r requirements-build.txt
+      - name: Prepare Windows OCR
+        shell: powershell
+        run: ./scripts/ensure_windows_ocr.ps1
       - run: python -m unittest discover -v
+        env:
+          RUN_WINDOWS_OCR: '1'
       - run: python scripts/build_windows.py --validate
         env:
           RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
@@ -41,6 +46,9 @@ jobs:
       - run: python scripts/build_windows.py
         env:
           RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+      - name: Prepare Windows OCR
+        shell: powershell
+        run: ./scripts/ensure_windows_ocr.ps1
       - name: Smoke test portable and installed application
         shell: pwsh
         run: ./scripts/smoke_windows.ps1

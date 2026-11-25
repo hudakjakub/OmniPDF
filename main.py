@@ -5,16 +5,18 @@ import json
 import os
 import sys
 import tempfile
+from bisect import bisect_left
+from collections import deque
 from pathlib import Path
 
 import pymupdf
-from PySide6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QTransform
+from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, QVariantAnimation, Signal
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QDrag, QIcon, QImage, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFrame,
-    QGraphicsDropShadowEffect, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
-    QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStyledItemDelegate,
-    QStyle, QStyleOptionViewItem, QTextEdit, QToolButton, QVBoxLayout, QWidget,
+    QGraphicsDropShadowEffect, QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QMenu, QMessageBox, QProgressDialog, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStyledItemDelegate,
+    QStyle, QStyleOptionToolButton, QStyleOptionViewItem, QStylePainter, QTextEdit, QToolButton, QVBoxLayout, QWidget,
 )
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
@@ -30,8 +32,10 @@ APP_ICON = Path(__file__).with_name('assets') / 'omni.svg'
 
 
 ERRORS = {
+    'The original PDF changed on disk. Save a copy or reopen the file.': 'Pôvodné PDF sa na disku zmenilo. Uložte kópiu alebo súbor znova otvorte.',
+    'Some recognized text could not be saved as searchable text.': 'Niektorý rozpoznaný text sa nepodarilo uložiť ako prehľadávateľný text.',
     'Encrypted PDFs are not supported.': 'PDF je chránené heslom. Otvorte odomknutú kópiu.',
-    'The PDF is damaged and required repair.': 'PDF je poškodené. Skúste ho znova exportovať.',
+    'The PDF could not be recovered.': 'PDF je poškodené. Skúste ho znova exportovať.',
     'This PDF does not permit editing.': 'Toto PDF má zakázané úpravy.',
     'Digitally signed PDFs are not supported.': 'Digitálne podpísané PDF nie je možné upraviť bez zneplatnenia podpisu.',
     'PDFs with signature fields are not supported.': 'Toto PDF obsahuje digitálny podpis.',
@@ -41,6 +45,9 @@ ERRORS = {
     'Only PDF files can be inserted.': 'Na vloženie ďalších strán vyberte PDF súbor.',
     'Select a valid area inside the page.': 'Označte oblasť vnútri strany.',
     'Enter valid text and font size.': 'Zadajte platný text a veľkosť písma.',
+    'Text at this angle cannot be edited directly.': 'Text v tomto uhle nemožno upraviť priamo.',
+    'Some characters in the replacement text cannot be rendered.': 'Niektoré znaky v náhradnom texte nemožno zobraziť.',
+    'The original text could not be removed safely.': 'Pôvodný text sa nepodarilo bezpečne odstrániť.',
     'The selected area overlaps neighboring text.': 'Okraj oblasti zasahuje do susedného textu. Označte celý text alebo zmenšite oblasť.',
     'The replacement text does not fit in the selected area.': 'Text sa nezmestí do oblasti. Zmenšite písmo alebo označte väčšiu oblasť.',
     'The original file cannot be overwritten.': 'Originál sa neprepisuje. Vyberte nový názov PDF.',
@@ -80,6 +87,7 @@ class PageView(QGraphicsView):
         self.rotation = pymupdf.Matrix(1, 1)
         self.derotation = pymupdf.Matrix(1, 1)
         self.selection_item = None
+        self.find_items = []
         self.area_bbox = None
         self.area_page = None
         self.area_drag = None
@@ -104,6 +112,7 @@ class PageView(QGraphicsView):
 
     def reset_document(self):
         self.scene().clear()
+        self.find_items.clear()
         self.area_preview = None
         self.page_rects = []
         self.page_items = []
@@ -207,6 +216,17 @@ class PageView(QGraphicsView):
     def display_rect(self, bbox):
         rect = pymupdf.Rect(bbox) * self.rotation
         return QRectF(rect.x0 + self.page_rect.x(), rect.y0 + self.page_rect.y(), rect.width, rect.height)
+
+    def show_find_hits(self, hits):
+        for item in self.find_items:
+            self.scene().removeItem(item)
+        self.find_items.clear()
+        for rect, current in hits:
+            pen = QPen(QColor('#a66008'), 1) if current else QPen(Qt.PenStyle.NoPen)
+            fill = QColor(255, 183, 43, 135) if current else QColor(255, 210, 77, 95)
+            item = self.scene().addRect(rect, pen, fill)
+            item.setZValue(0.5)
+            self.find_items.append(item)
 
     def highlight(self, bbox, transform=None):
         self.highlight_boxes([bbox] if bbox is not None else [], transform)
@@ -473,15 +493,32 @@ class OcrWorker(QThread):
     completed = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, image_path, parent):
+    def __init__(self, document, index, parent):
         super().__init__(parent)
-        self.image_path = image_path
+        self.document = document
+        self.version = document.page_versions[index]
+        page = document.document[index]
+        self.scale = min(3.0, 3500 / max(page.rect.width, page.rect.height))
+        self.rotation = page.rotation
+        self.derotation = page.derotation_matrix
+        self.bounds = page.rect * self.derotation
+        self.native = [pymupdf.Rect(s['bbox']) for s in document.spans(index)]
+        self.temp = tempfile.TemporaryDirectory(prefix='omnipdf-ocr-')
+        self.image_path = Path(self.temp.name) / 'page.png'
+        try:
+            document.render(index, self.scale).save(self.image_path)
+        except Exception:
+            self.temp.cleanup()
+            raise
 
     def run(self):
         try:
-            self.completed.emit(recognize(self.image_path))
+            lines = recognize(self.image_path, cancelled=self.isInterruptionRequested)
+            if not self.isInterruptionRequested():
+                self.completed.emit(lines)
         except Exception as exc:
-            self.failed.emit(str(exc))
+            if not self.isInterruptionRequested():
+                self.failed.emit(str(exc))
 
 
 class UpdateWorker(QThread):
@@ -542,6 +579,162 @@ class ThumbnailDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+class ThumbnailList(QListWidget):
+    pages_moved = Signal(object, int)
+
+    def __init__(self):
+        super().__init__()
+        self.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDropIndicatorShown(False)
+        self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self._drag_item = None
+        self._drag_pages = []
+        self._drop_y = None
+        self._moving_thumbnails = []
+        self._reorder_overlay = QLabel(self.viewport())
+        self._reorder_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._reorder_overlay.hide()
+        self._reorder_animation = QVariantAnimation(self)
+        self._reorder_animation.setStartValue(0.0)
+        self._reorder_animation.setEndValue(1.0)
+        self._reorder_animation.setDuration(210)
+        self._reorder_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self._reorder_animation.valueChanged.connect(self._paint_reorder)
+        self._reorder_animation.finished.connect(self.stop_reorder)
+        self.verticalScrollBar().valueChanged.connect(self.stop_reorder)
+
+    def selected_pages(self):
+        return sorted(self.row(item) for item in self.selectedItems() if item.flags() & Qt.ItemFlag.ItemIsDragEnabled)
+
+    def startDrag(self, supported_actions):
+        item = self.currentItem()
+        if item is None or not item.flags() & Qt.ItemFlag.ItemIsDragEnabled:
+            return
+        self.stop_reorder()
+        self._drag_item = item
+        self._drag_pages = self.selected_pages() if item.isSelected() else [self.row(item)]
+        drag = QDrag(self)
+        drag.setMimeData(self.mimeData([self.item(index) for index in self._drag_pages]))
+        drag.setPixmap(item.icon().pixmap(self.iconSize()))
+        try:
+            drag.exec(Qt.DropAction.MoveAction)
+        finally:
+            self._drag_item = None
+            self._drag_pages = []
+            self._set_drop_y(None)
+
+    def _drop_boundary(self, y):
+        return bisect_left(range(self.count() - 1), y,
+                           key=lambda row: self.visualItemRect(self.item(row)).center().y())
+
+    def _set_drop_y(self, y):
+        if self._drop_y != y:
+            self._drop_y = y
+            self.viewport().update()
+
+    def dragMoveEvent(self, event):
+        super().dragMoveEvent(event)
+        if event.source() is self and self._drag_item is not None:
+            self._set_drop_y(event.position().y())
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+
+    def dragLeaveEvent(self, event):
+        self._set_drop_y(None)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event):
+        self._set_drop_y(None)
+        if event.source() is not self or self._drag_item is None or self.row(self._drag_item) < 0:
+            event.ignore()
+            return
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
+        self.pages_moved.emit(self._drag_pages, self._drop_boundary(event.position().y()))
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self._drop_y is not None and self.count() > 1:
+            boundary = self._drop_boundary(self._drop_y)
+            rect = self.visualItemRect(self.item(boundary))
+            gap = self.spacing() if boundary else self.spacing() // 2
+            y = max(2, min(rect.top() - gap, self.viewport().height() - 3))
+            painter = QPainter(self.viewport())
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(QPen(QColor('#087f83'), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            painter.drawLine(rect.left() + 8, y, rect.right() - 8, y)
+
+    def stop_reorder(self):
+        self._reorder_animation.stop()
+        self._reorder_overlay.hide()
+        self._moving_thumbnails.clear()
+
+    def resizeEvent(self, event):
+        self.stop_reorder()
+        super().resizeEvent(event)
+
+    def mousePressEvent(self, event):
+        self.stop_reorder()
+        super().mousePressEvent(event)
+
+    def animate_reorder(self, before, after):
+        if before == after or len(before) != len(after) or set(before) != set(after) or not self.isVisible():
+            return
+        self.stop_reorder()
+        self.doItemsLayout()
+        viewport = self.viewport().rect()
+        old_rows = {page: row for row, page in enumerate(before)}
+        frames = []
+        for row in range(self.count()):
+            old_row = old_rows[after[row]] if row < len(after) else row
+            item = self.item(row)
+            rect = self.visualItemRect(item)
+            old_y = self.visualItemRect(self.item(old_row)).top()
+            if rect.intersects(viewport) or rect.translated(0, old_y - rect.top()).intersects(viewport):
+                frames.append((item.isSelected(), rect.topLeft(), old_y, self._thumbnail_pixmap(item, rect.size())))
+        if any(point.y() != old_y for _, point, old_y, _ in frames):
+            # Keep the moved selection above the cards it passes.
+            self._moving_thumbnails = sorted(frames, key=lambda frame: frame[0])
+            self._reorder_overlay.setGeometry(viewport)
+            self._paint_reorder(0.0)
+            self._reorder_overlay.show()
+            self._reorder_overlay.raise_()
+            self._reorder_animation.start()
+
+    def _thumbnail_pixmap(self, item, size):
+        ratio = self.devicePixelRatioF()
+        image = QPixmap(size * ratio)
+        image.setDevicePixelRatio(ratio)
+        image.fill(Qt.GlobalColor.transparent)
+        option = QStyleOptionViewItem()
+        self.initViewItemOption(option)
+        option.rect = QRect(QPoint(), size)
+        if item.isSelected():
+            option.state |= QStyle.StateFlag.State_Selected
+        painter = QPainter(image)
+        self.itemDelegate().paint(painter, option, self.indexFromItem(item))
+        controls = self.itemWidget(item)
+        if controls:
+            controls.render(painter, QPoint(), renderFlags=QWidget.RenderFlag.DrawChildren)
+        painter.end()
+        return image
+
+    def _paint_reorder(self, progress):
+        if not self._moving_thumbnails:
+            return
+        ratio = self.devicePixelRatioF()
+        frame = QPixmap(self.viewport().size() * ratio)
+        frame.setDevicePixelRatio(ratio)
+        frame.fill(self.viewport().palette().color(QPalette.ColorRole.Base))
+        painter = QPainter(frame)
+        for _, point, old_y, image in self._moving_thumbnails:
+            y = old_y + (point.y() - old_y) * progress
+            painter.drawPixmap(QPointF(point.x(), y), image)
+        painter.end()
+        self._reorder_overlay.setPixmap(frame)
+
+
 class AppendPdfCard(QWidget):
     def __init__(self, callback):
         super().__init__()
@@ -558,16 +751,71 @@ class AppendPdfCard(QWidget):
         self.button.move(margin, margin)
 
 
+class ToolbarButton(QToolButton):
+    def __init__(self):
+        super().__init__()
+        self._hover = QVariantAnimation(self)
+        self._hover.setStartValue(0.0)
+        self._hover.setEndValue(4.0)
+        self._hover.setDuration(160)
+        self._hover.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self._hover.valueChanged.connect(self.update)
+
+    def event(self, event):
+        event_type = event.type()
+        if event_type == QEvent.Type.Enter and self.isEnabled():
+            self._hover.setDirection(QVariantAnimation.Direction.Forward)
+            self._hover.start()
+        elif event_type == QEvent.Type.Leave and self._hover.currentTime() > 0:
+            self._hover.setDirection(QVariantAnimation.Direction.Backward)
+            self._hover.start()
+        elif event_type == QEvent.Type.EnabledChange and not self.isEnabled():
+            self._hover.stop()
+            self._hover.setCurrentTime(0)
+        return super().event(event)
+
+    def paintEvent(self, event):
+        option = QStyleOptionToolButton()
+        self.initStyleOption(option)
+        option.icon = QIcon()
+        painter = QStylePainter(self)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ToolButton, option)
+
+        mode = QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled
+        state = QIcon.State.On if self.isChecked() else QIcon.State.Off
+        pixmap = self.icon().pixmap(self.size(), self.devicePixelRatioF(), mode, state)
+        size = self.iconSize().width() + self._hover.currentValue()
+        rect = QRectF((self.width() - size) / 2, (self.height() - size) / 2, size, size)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.drawPixmap(rect, pixmap, QRectF(pixmap.rect()))
+
+
 class Editor(QMainWindow):
     def __init__(self):
         super().__init__()
         self.pdf = None
         self.page_index = 0
         self.selection = None
-        self.ocr_areas = {}
-        self.ocr_attempted = set()
+        self._editor_open = False
+        self._editor_width = 320
+        self._resizing_editor_panel = False
         self.ocr_worker = None
-        self.ocr_temp = None
+        self.ocr_timer = QTimer(self)
+        self.ocr_timer.setSingleShot(True)
+        self.ocr_timer.timeout.connect(self._start_next_ocr)
+        self._searchable_progress = None
+        self._searchable_pages = deque()
+        self._searchable_error = None
+        self._thumbnail_icons = {}
+        self._raster_versions = {}
+        self._find_pending = deque()
+        self._find_ocr_pages = {}
+        self._find_failed_pages = set()
+        self._find_results = {}
+        self._find_hit = None
+        self._find_timer = QTimer(self)
+        self._find_timer.setSingleShot(True)
+        self._find_timer.timeout.connect(self._search_next_pages)
         self.pending = False
         self.edit_applied = False
         self.update_worker = None
@@ -608,6 +856,11 @@ class Editor(QMainWindow):
         super().showEvent(event)
         if QApplication.platformName() == 'windows':
             configure_title_bar(int(self.winId()))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.centralWidget() and self.find_bar.isVisible():
+            self._position_find()
 
     def eventFilter(self, watched, event):
         if (not isinstance(watched, QWidget)
@@ -680,18 +933,17 @@ class Editor(QMainWindow):
         toolbar_layout.setHorizontalSpacing(8)
         row = QHBoxLayout()
         row.setSpacing(3)
-        logo = QLabel()
-        logo.setObjectName('brandLogo')
-        logo.setFixedSize(24, 24)
-        logo.setPixmap(self.windowIcon().pixmap(QSize(24, 24)))
-        logo.setAccessibleName(f'Logo {APP_NAME}')
-        row.addWidget(logo)
-        brand = QToolButton()
-        brand.setText(APP_NAME)
+        brand = ToolbarButton()
         brand.setObjectName('brand')
+        brand.setIcon(self.windowIcon())
+        brand.setIconSize(QSize(22, 22))
+        brand.setFixedSize(32, 32)
+        brand.setAutoRaise(True)
         brand.setToolTip(f'{APP_NAME} {VERSION}')
         brand.setAccessibleName(_('Ponuka aplikácie Omni PDF'))
         self.app_menu = QMenu(self)
+        self.searchable_action = self.app_menu.addAction(_('Uložiť ako prehľadávateľné PDF…'), lambda: self.save_copy(searchable=True))
+        self.app_menu.addSeparator()
         self.app_menu.addAction(_('O aplikácii…'), self.show_about)
         self.check_updates_action = self.app_menu.addAction(_('Skontrolovať aktualizácie…'), self.check_updates)
         self.auto_update_action = self.app_menu.addAction(_('Automatické aktualizácie'))
@@ -702,15 +954,14 @@ class Editor(QMainWindow):
         brand.setMenu(self.app_menu)
         brand.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         row.addWidget(brand)
-        logo.setToolTip(_('{name} · Editor PDF\nSúbory zostávajú v počítači').format(name=APP_NAME))
-        self.file_label = QLabel(_('PDF, JPG alebo PNG'))
+        self.file_label = QLabel()
         self.file_label.setObjectName('filename')
         self.file_label.setMinimumWidth(80)
         self.file_label.setMaximumWidth(160)
         self.file_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         row.addWidget(self.file_label, 1)
         self.open_button = self._tool_button(_('Otvoriť súbor (Ctrl+O)'), 'open', self.open_file, row)
-        self.save_button = self._tool_button(_('Uložiť kópiu (Ctrl+S alebo Ctrl+Shift+S)'), 'save', self.save_copy, row)
+        self.save_button = self._tool_button(_('Uložiť PDF (Ctrl+S alebo Ctrl+Shift+S)'), 'save', self.save_copy, row)
         self._toolbar_separator(row)
         self.undo_button = self._tool_button(_('Späť (Ctrl+Z)'), 'undo', self.undo, row)
         self.redo_button = self._tool_button(_('Dopredu (Ctrl+Y)'), 'redo', self.redo, row)
@@ -729,7 +980,11 @@ class Editor(QMainWindow):
         self.pages_button = self._tool_button(_('Spravovať strany'), 'pages', None, bar)
         self.pages_menu = QMenu(self)
         self.duplicate_page_action = self.pages_menu.addAction(_('Duplikovať aktuálnu stranu'), self.duplicate_page)
-        self.delete_page_action = self.pages_menu.addAction(_('Odstrániť aktuálnu stranu'), self.delete_page)
+        self.delete_page_action = self.pages_menu.addAction(_('Odstrániť vybrané strany'), self.delete_page)
+        self.move_up_action = self.pages_menu.addAction(_('Presunúť vybrané strany vyššie'), lambda: self._move_selected(-1))
+        self.move_down_action = self.pages_menu.addAction(_('Presunúť vybrané strany nižšie'), lambda: self._move_selected(1))
+        self.rotate_left_action = self.pages_menu.addAction(_('Otočiť vybrané strany doľava'), lambda: self._rotate_selected(-90))
+        self.rotate_right_action = self.pages_menu.addAction(_('Otočiť vybrané strany doprava'), lambda: self._rotate_selected(90))
         self.pages_menu.addSeparator()
         self.insert_pdf_action = self.pages_menu.addAction(_('Vložiť PDF za aktuálnu stranu…'), self.insert_pdf)
         self.pages_button.setMenu(self.pages_menu)
@@ -757,12 +1012,44 @@ class Editor(QMainWindow):
         toolbar_layout.setColumnMinimumWidth(2, side_width)
         toolbar_layout.setColumnStretch(0, 1)
         toolbar_layout.setColumnStretch(2, 1)
+        self.file_label.hide()
         layout.addWidget(tools)
+
+        self.find_bar = QFrame(root)
+        self.find_bar.setObjectName('findBar')
+        self.find_bar.setFixedWidth(356)
+        shadow = QGraphicsDropShadowEffect(self.find_bar)
+        shadow.setBlurRadius(20)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(30, 45, 56, 42))
+        self.find_bar.setGraphicsEffect(shadow)
+        find_layout = QVBoxLayout(self.find_bar)
+        find_layout.setContentsMargins(8, 7, 8, 7)
+        find_layout.setSpacing(4)
+        find_row = QHBoxLayout()
+        find_row.setSpacing(3)
+        self.find_input = QLineEdit()
+        self.find_input.setObjectName('findInput')
+        self.find_input.setPlaceholderText(_('Hľadať v dokumente'))
+        self.find_input.setAccessibleName(_('Hľadať v dokumente'))
+        self.find_input.textChanged.connect(self._restart_find)
+        self.find_input.returnPressed.connect(lambda: self._move_find(1))
+        find_row.addWidget(self.find_input, 1)
+        self.find_previous = self._tool_button(_('Predchádzajúci výsledok'), 'previous', lambda: self._move_find(-1), find_row, button_class=QToolButton)
+        self.find_next = self._tool_button(_('Ďalší výsledok'), 'next', lambda: self._move_find(1), find_row, button_class=QToolButton)
+        self._tool_button(_('Zavrieť hľadanie'), 'close', self._close_find, find_row, button_class=QToolButton)
+        find_layout.addLayout(find_row)
+        self.find_status = QLabel()
+        self.find_status.setObjectName('findStatus')
+        self.find_status.setWordWrap(True)
+        self.find_status.hide()
+        find_layout.addWidget(self.find_status)
+        self.find_bar.hide()
 
         self.splitter = QSplitter()
         self.view = PageView()
         self.view.page_requested.connect(self._activate_scrolled_page)
-        self.view.verticalScrollBar().valueChanged.connect(lambda: self.scroll_sync_timer.start(0))
+        self.view.verticalScrollBar().valueChanged.connect(self._queue_scroll_sync)
         self.view.horizontalScrollBar().valueChanged.connect(lambda: self.view.raster_timer.start())
         self.view.selected.connect(self.select_text)
         self.view.region.connect(self.select_region)
@@ -783,7 +1070,7 @@ class Editor(QMainWindow):
         title.setObjectName('paneltitle')
         panel_header = QHBoxLayout()
         panel_header.addWidget(title, 1)
-        self.cancel_button = self._tool_button(_('Zrušiť výber (Escape)'), 'close', self.cancel_selection, panel_header)
+        self.cancel_button = self._tool_button(_('Zrušiť výber (Escape)'), 'close', self.cancel_selection, panel_header, button_class=QToolButton)
         self.cancel_button.setFixedSize(32, 32)
         self.cancel_button.setIconSize(QSize(16, 16))
         form.addLayout(panel_header)
@@ -827,22 +1114,29 @@ class Editor(QMainWindow):
         formatting.addWidget(self.font_size)
         self.white_background = QCheckBox(_('Biely podklad'))
         self.white_background.setToolTip(_('Biely podklad pod nahradeným textom'))
-        self.white_background.setChecked(True)
         self.white_background.toggled.connect(self._edited)
         formatting.addWidget(self.white_background)
         formatting.addStretch()
         form.addLayout(formatting)
         form.addStretch()
-        panel_scroll = QScrollArea()
-        panel_scroll.setObjectName('editorPanel')
-        panel_scroll.setMinimumWidth(280)
-        panel_scroll.setMaximumWidth(350)
-        panel_scroll.setWidgetResizable(True)
-        panel_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        panel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        panel_scroll.setWidget(panel)
-        self.splitter.addWidget(panel_scroll)
-        self.thumbnails = QListWidget()
+        self.editor_panel = QScrollArea()
+        self.editor_panel.setObjectName('editorPanel')
+        self.editor_panel.setMaximumWidth(350)
+        self.editor_panel.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self.editor_panel.setWidgetResizable(True)
+        self.editor_panel.setFrameShape(QFrame.Shape.NoFrame)
+        self.editor_panel.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.editor_panel.setWidget(panel)
+        self.splitter.addWidget(self.editor_panel)
+        self.editor_panel.hide()
+        self._editor_slide = QVariantAnimation(self)
+        self._editor_slide.setStartValue(0.0)
+        self._editor_slide.setEndValue(1.0)
+        self._editor_slide.setDuration(200)
+        self._editor_slide.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self._editor_slide.valueChanged.connect(self._slide_editor_panel)
+        self._editor_slide.finished.connect(self._finish_editor_slide)
+        self.thumbnails = ThumbnailList()
         self.thumbnails.setObjectName('thumbnails')
         self.thumbnails.setAccessibleName(_('Náhľady strán'))
         self.thumbnails.setFixedWidth(160)
@@ -854,11 +1148,14 @@ class Editor(QMainWindow):
         self.thumbnails.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.thumbnails.setIconSize(QSize(120, 160))
         self.thumbnails.currentRowChanged.connect(self._thumbnail_selected)
+        self.thumbnails.itemSelectionChanged.connect(self._update_pagination)
+        self.thumbnails.pages_moved.connect(self.move_pages)
         self.thumbnails.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.thumbnails.customContextMenuRequested.connect(self._thumbnail_menu)
         self.splitter.insertWidget(0, self.thumbnails)
         self.splitter.setCollapsible(0, False)
-        self.splitter.setSizes([160, 860, 320])
+        self.splitter.setCollapsible(2, False)
+        self.splitter.setSizes([160, 1180, 0])
         layout.addWidget(self.splitter, 1)
 
         self.empty = QWidget()
@@ -904,12 +1201,14 @@ class Editor(QMainWindow):
         layout.addWidget(self.empty, 1)
         self.splitter.hide()
         self.setCentralWidget(root)
+        empty_button.setFocus()
         self.statusBar().addPermanentWidget(QLabel(f'v{VERSION}'))
         self.statusBar().showMessage(_('Pripravené. Spracovanie prebieha lokálne bez nahrávania súborov.'))
         for keys, callback in [
             ('Ctrl+O', self.open_file), ('Ctrl+S', self.save_button.click),
             ('Ctrl+Shift+S', self.save_button.click), ('Ctrl+Z', self.undo),
-            ('Ctrl+Y', self.redo), ('Ctrl+Shift+Z', self.redo), ('Esc', self.cancel_selection),
+            ('Ctrl+Y', self.redo), ('Ctrl+Shift+Z', self.redo), ('Esc', self._escape),
+            ('Ctrl+F', self._open_find), ('F3', lambda: self._move_find(1)), ('Shift+F3', lambda: self._move_find(-1)),
             ('Ctrl++', self.plus_button.click), ('Ctrl+=', self.plus_button.click),
             ('Ctrl+-', self.minus_button.click), ('Ctrl+0', self.fit_button.click),
         ]:
@@ -917,16 +1216,6 @@ class Editor(QMainWindow):
             action.setShortcut(QKeySequence(keys))
             action.triggered.connect(callback)
             self.addAction(action)
-
-    @staticmethod
-    def _button(label, callback, layout, primary=False):
-        button = QPushButton(label)
-        if primary:
-            button.setObjectName('primary')
-        if callback:
-            button.clicked.connect(callback)
-        layout.addWidget(button)
-        return button
 
     @staticmethod
     def _toolbar_separator(layout):
@@ -937,7 +1226,7 @@ class Editor(QMainWindow):
         layout.addWidget(line)
         layout.addSpacing(4)
 
-    def _tool_button(self, label, symbol, callback, layout):
+    def _tool_button(self, label, symbol, callback, layout, *, button_class=ToolbarButton):
         pixmap = QPixmap(24, 24)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
@@ -1021,7 +1310,7 @@ class Editor(QMainWindow):
         painter.end()
         icon = QIcon(pixmap)
         icon.addPixmap(disabled, QIcon.Mode.Disabled)
-        button = QToolButton()
+        button = button_class()
         button.setIcon(icon)
         button.setIconSize(QSize(17, 17))
         button.setFixedSize(28, 28)
@@ -1038,12 +1327,64 @@ class Editor(QMainWindow):
         QMessageBox.warning(self, _('Akciu sa nepodarilo dokončiť'), message)
 
     def _busy(self):
-        return self.ocr_worker is not None
+        return self._searchable_progress is not None or (self._install_pending and self.update_worker is not None)
+
+    def _has_editable_selection(self):
+        return self.selection is not None and 'characters' not in self.selection and self.selection.get('kind') != 'area'
+
+    def _set_editor_open(self, opened):
+        if opened == self._editor_open:
+            return
+        self._editor_open = opened
+        panel = self.editor_panel
+        slide = self._editor_slide
+        running = slide.state() == QVariantAnimation.State.Running
+        if not opened and not running:
+            self._editor_width = panel.width()
+        focus = QApplication.focusWidget()
+        if not opened and focus is not None and panel.isAncestorOf(focus):
+            self.view.setFocus()
+        # Clip the form during the transition so its controls and text do not reflow.
+        panel.widget().setMinimumWidth(self._editor_width - panel.verticalScrollBar().sizeHint().width())
+        panel.setMinimumWidth(0)
+        self.splitter.handle(2).setEnabled(False)
+        if panel.isHidden():
+            panel.show()
+            self._slide_editor_panel(0.0)
+        slide.setDirection(QVariantAnimation.Direction.Forward if opened else QVariantAnimation.Direction.Backward)
+        slide.start()
+
+    def _slide_editor_panel(self, progress):
+        sidebar, document, current = self.splitter.sizes()
+        width = round(self._editor_width * progress)
+        if width == current:
+            return
+        center = self.view.viewport().rect().center()
+        scene_center = self.view.mapToScene(center)
+        self._resizing_editor_panel = True
+        try:
+            self.splitter.setSizes([sidebar, document + current - width, width])
+            if self.view.fit_to_width:
+                scroll = self.view.verticalScrollBar()
+                scroll.setValue(scroll.value() + self.view.mapFromScene(scene_center).y() - center.y())
+        finally:
+            self._resizing_editor_panel = False
+
+    def _finish_editor_slide(self):
+        if self._editor_open:
+            self.editor_panel.setMinimumWidth(280)
+        else:
+            self.editor_panel.hide()
+        self.editor_panel.widget().setMinimumWidth(0)
+        self.splitter.handle(2).setEnabled(True)
+        self._queue_scroll_sync()
 
     def _update_actions(self):
         ready = self.pdf is not None and not self._busy()
         has_pages = ready and self.pdf.page_count > 0
-        editable = ready and self.selection is not None and 'characters' not in self.selection and self.selection.get('kind') != 'area'
+        has_editable_selection = self._has_editable_selection()
+        editable = ready and has_editable_selection
+        self._set_editor_open(has_editable_selection)
         self.open_button.setEnabled(not self._busy())
         for widget in (self.save_button, self.region_button, self.cover_button, self.minus_button, self.fit_button, self.plus_button, self.view):
             widget.setEnabled(has_pages)
@@ -1053,6 +1394,9 @@ class Editor(QMainWindow):
         self.duplicate_page_action.setEnabled(has_pages)
         self.insert_pdf_action.setEnabled(ready)
         self.delete_page_action.setEnabled(has_pages)
+        self.searchable_action.setEnabled(has_pages)
+        self.rotate_left_action.setEnabled(has_pages)
+        self.rotate_right_action.setEnabled(has_pages)
         for index in range(self.thumbnails.count()):
             item = self.thumbnails.item(index)
             controls = self.thumbnails.itemWidget(item)
@@ -1086,15 +1430,28 @@ class Editor(QMainWindow):
             return False
         if not self.pdf or not (self.pdf.dirty or self.pending):
             return True
-        answer = QMessageBox.question(self, _('Neuložené zmeny'), _('Uložiť zmeny do novej PDF kópie?'), QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Save)
-        if answer == QMessageBox.StandardButton.Save:
+        buttons = QMessageBox.StandardButton
+        prompt = QMessageBox(QMessageBox.Icon.Question, _('Neuložené zmeny'), _('Uložiť zmeny do PDF?'),
+                             buttons.Save | buttons.Discard | buttons.Cancel, self)
+        save_button = prompt.button(buttons.Save)
+        save_button.setObjectName('primary')
+        save_button.style().unpolish(save_button)
+        save_button.style().polish(save_button)
+        prompt.setDefaultButton(save_button)
+        # Qt needs an escape button to handle the title-bar close action.
+        cancel_button = prompt.button(buttons.Cancel)
+        prompt.setEscapeButton(cancel_button)
+        cancel_button.hide()
+        answer = prompt.exec()
+        prompt.deleteLater()
+        if answer == buttons.Save:
             return self.save_copy()
-        return answer == QMessageBox.StandardButton.Discard
+        return answer == buttons.Discard
 
     def _confirm_signed_pdf(self):
         return QMessageBox.question(
             self, _('Digitálne podpísané PDF'),
-            _('Tento dokument obsahuje digitálny podpis. Aplikácia neoveruje jeho platnosť. Uložením kópie alebo vložením strán sa podpis zneplatní. Pôvodný súbor zostane nezmenený. Chcete pokračovať?'),
+            _('Tento dokument obsahuje digitálny podpis. Aplikácia neoveruje jeho platnosť. Uložením upraveného PDF alebo vložením strán sa podpis zneplatní. Chcete pokračovať?'),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
 
@@ -1116,6 +1473,8 @@ class Editor(QMainWindow):
             self._error(exc)
             return
         if self.pdf:
+            if self.ocr_worker:
+                self.ocr_worker.requestInterruption()
             self.pdf.close()
         self.pdf = document
         self.thumbnails.blockSignals(True)
@@ -1123,36 +1482,38 @@ class Editor(QMainWindow):
         self.add_pdf_card = None
         self.thumbnails.clear()
         self.thumbnails.blockSignals(False)
-        self.ocr_areas.clear()
-        self.ocr_attempted.clear()
+        self._thumbnail_icons.clear()
+        self._raster_versions.clear()
         self.selection = None
         self.pending = False
         self.empty.hide()
         self.splitter.show()
         self.file_label.setText(document.source.name)
         self.file_label.setToolTip(str(document.source))
+        self.file_label.show()
         self.page_index = 0
         self.view.reset_document()
         self.clear_selection()
         self.render_page(fit=True, scroll=True)
+        self._restart_find()
         self._update_pagination()
+        if document.recovered:
+            self.statusBar().showMessage(_('Štruktúra PDF bola obnovená. Pred uložením skontrolujte strany.'))
 
     def render_page(self, fit=False, *, scroll=False, refresh_thumbnails=True):
         if not self.pdf:
             return
         if not self.pdf.page_count:
             self.view.reset_document()
+            self._raster_versions.clear()
             self._refresh_thumbnails()
             self._update_actions()
             return
         try:
             page = self.pdf.document[self.page_index]
             native = self.pdf.spans(self.page_index)
-            areas = native + self.ocr_areas.get(self.page_index, [])
+            areas = native + (self.pdf.page_versions[self.page_index].ocr or [])
             self.view.configure_pages([(p.rect.width, p.rect.height) for p in self.pdf.document])
-            if refresh_thumbnails:
-                for index in list(self.view.page_scales):
-                    self.view.evict_page_raster(index)
             self.view.set_page(None, 1, page, areas, self.pdf.characters(self.page_index), page_index=self.page_index)
             if fit:
                 self.view.fit_width()
@@ -1165,16 +1526,16 @@ class Editor(QMainWindow):
                 self._refresh_thumbnails()
             else:
                 self.thumbnails.blockSignals(True)
-                self.thumbnails.setCurrentRow(self.page_index)
+                self._sync_thumbnail_page()
                 self.thumbnails.blockSignals(False)
             self._update_actions()
-            if not areas:
+            self._draw_find_hits()
+            if not areas and self.pdf.page_versions[self.page_index].ocr is None:
                 self.statusBar().showMessage(_('Text tejto strany sa rozpozná automaticky. Môžete tiež pridať textové pole alebo zakryť oblasť.'))
-                if self.page_index not in self.ocr_attempted and not self._busy():
-                    self.ocr_attempted.add(self.page_index)
-                    QTimer.singleShot(0, lambda document=self.pdf, index=self.page_index: self._auto_ocr(document, index))
             else:
                 self.statusBar().showMessage(_('Strana {page} z {count}. Ťahaním označte text a stlačte Delete. Kliknutím upravíte celý úsek.').format(page=self.page_index + 1, count=self.pdf.page_count))
+            if self._needs_ocr(self.page_index, native):
+                self.ocr_timer.start(0)
         except Exception as exc:
             self._error(exc)
 
@@ -1192,16 +1553,23 @@ class Editor(QMainWindow):
         for index in list(self.view.page_scales):
             if index not in wanted:
                 self.view.evict_page_raster(index)
+                self._raster_versions.pop(index, None)
         for index in sorted(wanted):
             scale = self._render_scale(self.pdf.document[index])
-            if abs(scale - self.view.page_scales.get(index, 0)) > 0.05:
+            version = self.pdf.page_versions[index]
+            if self._raster_versions.get(index) is not version or index not in self.view.page_scales or abs(scale - self.view.page_scales[index]) > 0.05:
                 self.view.update_page_raster(index, self.pdf.render(index, scale), scale)
+                self._raster_versions[index] = version
 
     def _activate_scrolled_page(self, index):
         if not self.pdf or self._busy() or index == self.page_index:
             return
         self.page_index = index
         self.render_page(refresh_thumbnails=False)
+
+    def _queue_scroll_sync(self):
+        if not self._resizing_editor_panel and not self.scroll_sync_timer.isActive():
+            self.scroll_sync_timer.start(0)
 
     def _sync_scroll_page(self):
         if not self.pdf or self._busy() or not self.view.page_rects:
@@ -1213,6 +1581,7 @@ class Editor(QMainWindow):
     def _refresh_thumbnails(self):
         if not self.pdf or self.thumbnails.isHidden():
             return
+        self.thumbnails.stop_reorder()
         self.thumbnails.blockSignals(True)
         try:
             if self.add_pdf_item is None:
@@ -1230,16 +1599,25 @@ class Editor(QMainWindow):
                 item.setSizeHint(QSize(120, 200))
                 self.thumbnails.insertItem(index, item)
                 self._add_thumbnail_actions(item)
-            for index in range(self.pdf.page_count):
-                rect = self.pdf.document[index].rect
-                pixmap = self.pdf.render(index, min(120 / rect.width, 160 / rect.height))
-                image = QImage(pixmap.samples, pixmap.width, pixmap.height, pixmap.stride, QImage.Format.Format_RGB888).copy()
-                self.thumbnails.item(index).setIcon(QIcon(QPixmap.fromImage(image)))
+            icons = {}
+            for index, version in enumerate(self.pdf.page_versions):
+                icon = self._thumbnail_icons.get(version)
+                if icon is None:
+                    rect = self.pdf.document[index].rect
+                    pixmap = self.pdf.render(index, min(120 / rect.width, 160 / rect.height))
+                    image = QImage(pixmap.samples, pixmap.width, pixmap.height, pixmap.stride, QImage.Format.Format_RGB888).copy()
+                    icon = QIcon(QPixmap.fromImage(image))
+                icons[version] = icon
+                item = self.thumbnails.item(index)
+                if item.icon().cacheKey() != icon.cacheKey():
+                    item.setIcon(icon)
+            self._thumbnail_icons = icons
             if self.pdf.page_count:
-                self.add_pdf_card.button.setFixedSize(pixmap.width, pixmap.height)
-                margin = max(0, (self.add_pdf_card.width() - pixmap.width) // 2)
+                size = icon.actualSize(self.thumbnails.iconSize())
+                self.add_pdf_card.button.setFixedSize(size)
+                margin = max(0, (self.add_pdf_card.width() - size.width()) // 2)
                 self.add_pdf_card.button.move(margin, margin)
-            self.thumbnails.setCurrentRow(self.page_index if self.pdf.page_count else -1)
+            self._sync_thumbnail_page()
         finally:
             self.thumbnails.blockSignals(False)
 
@@ -1251,11 +1629,11 @@ class Editor(QMainWindow):
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         duplicate = self._tool_button(_('Duplikovať stranu'), 'pages',
-            lambda: self._thumbnail_action(item, self.duplicate_page), row)
+            lambda: self._thumbnail_action(item, self.duplicate_page), row, button_class=QToolButton)
         duplicate.setObjectName('duplicatePage')
         row.addStretch()
         delete = self._tool_button(_('Odstrániť stranu'), 'close',
-            lambda: self._thumbnail_action(item, self.delete_page), row)
+            lambda: self._thumbnail_action(item, self.delete_page), row, button_class=QToolButton)
         delete.setObjectName('deletePage')
         for button in (duplicate, delete):
             button.setFixedSize(20, 20)
@@ -1269,13 +1647,37 @@ class Editor(QMainWindow):
         index = self.thumbnails.row(item)
         self.change_page(index)
         if self.page_index == index and not self.pending:
+            self._set_thumbnail_pages([index])
             callback()
 
     def _thumbnail_selected(self, index):
         self.change_page(index)
-        self.thumbnails.blockSignals(True)
-        self.thumbnails.setCurrentRow(self.page_index)
-        self.thumbnails.blockSignals(False)
+        if self.pdf and self.pdf.page_count and self.page_index != index:
+            self._set_thumbnail_pages([self.page_index])
+
+    def _sync_thumbnail_page(self):
+        index = self.page_index if self.pdf.page_count else -1
+        if self.thumbnails.currentRow() != index:
+            if len(self.thumbnails.selected_pages()) > 1:
+                self.thumbnails.setCurrentRow(index, QItemSelectionModel.SelectionFlag.NoUpdate)
+            else:
+                self.thumbnails.setCurrentRow(index)
+
+    def _set_thumbnail_pages(self, indices):
+        blocked = self.thumbnails.blockSignals(True)
+        try:
+            self.thumbnails.clearSelection()
+            self.thumbnails.setCurrentRow(self.page_index if indices else -1, QItemSelectionModel.SelectionFlag.NoUpdate)
+            for index in indices:
+                self.thumbnails.item(index).setSelected(True)
+        finally:
+            self.thumbnails.blockSignals(blocked)
+        self._update_pagination()
+
+    def _selected_pages(self):
+        if not self.pdf or not self.pdf.page_count:
+            return []
+        return [i for i in self.thumbnails.selected_pages() if i < self.pdf.page_count] or [self.page_index]
 
     def _thumbnail_menu(self, point):
         item = self.thumbnails.itemAt(point)
@@ -1284,27 +1686,64 @@ class Editor(QMainWindow):
         index = self.thumbnails.row(item)
         self.change_page(index)
         if self.page_index == index and not self.pending:
+            if not item.isSelected():
+                self._set_thumbnail_pages([index])
             self.pages_menu.exec(self.thumbnails.viewport().mapToGlobal(point))
 
-    def _pages_changed(self, index, *, scroll=True):
+    def _pages_changed(self, index, *, scroll=True, selected=None):
         self.page_index = max(0, min(index, self.pdf.page_count - 1))
-        self.ocr_areas.clear()
-        self.ocr_attempted.clear()
         self.region_button.setChecked(False)
         self.cover_button.setChecked(False)
         self.clear_selection()
+        self._restart_find()
         self.render_page(fit=self.view.fit_to_width, scroll=scroll)
+        self._set_thumbnail_pages((selected or [self.page_index]) if self.pdf.page_count else [])
+
+    def move_pages(self, indices, boundary):
+        if not self.pdf or self._busy() or not indices or not self._discard_pending():
+            return
+        before = self.pdf.page_versions
+        try:
+            destination = self.pdf.move_pages(indices, boundary)
+        except Exception as exc:
+            self._error(exc)
+            return
+        if before == self.pdf.page_versions:
+            return
+        self._pages_changed(destination, selected=range(destination, destination + len(indices)))
+        self.thumbnails.animate_reorder(before, self.pdf.page_versions)
+        self.statusBar().showMessage(_('Strany boli presunuté. Presun vrátite pomocou Ctrl+Z.'))
+
+    def _move_selected(self, direction):
+        indices = self._selected_pages()
+        if indices:
+            boundary = indices[0] - 1 if direction < 0 else indices[-1] + 2
+            if 0 <= boundary <= self.pdf.page_count:
+                self.move_pages(indices, boundary)
+
+    def _rotate_selected(self, angle):
+        indices = self._selected_pages()
+        if not indices or self._busy() or not self._discard_pending():
+            return
+        try:
+            self.pdf.rotate_pages(indices, angle)
+        except Exception as exc:
+            self._error(exc)
+            return
+        active = self.page_index if self.page_index in indices else indices[0]
+        self._pages_changed(active, selected=indices)
 
     def delete_page(self):
         if not self.pdf or self._busy() or not self.pdf.page_count or not self._discard_pending():
             return
+        indices = self._selected_pages()
         try:
-            self.pdf.delete_page(self.page_index)
+            self.pdf.delete_pages(indices)
         except Exception as exc:
             self._error(exc)
             return
-        self._pages_changed(self.page_index)
-        self.statusBar().showMessage(_('Strana bola odstránená. Obnovíte ju pomocou Ctrl+Z.'))
+        self._pages_changed(indices[0])
+        self.statusBar().showMessage(_('Strany boli odstránené. Obnovíte ich pomocou Ctrl+Z.'))
 
     def duplicate_page(self):
         if not self.pdf or self._busy() or not self.pdf.page_count or not self._discard_pending():
@@ -1337,7 +1776,7 @@ class Editor(QMainWindow):
             self._error(exc)
             return
         self._pages_changed(index + 1)
-        self.statusBar().showMessage(_('Strany z PDF boli vložené. Výsledok uložte ako kópiu.'))
+        self.statusBar().showMessage(_('Strany z PDF boli vložené. Výsledok uložte ako PDF.'))
 
     def refresh_preview(self):
         if not self.pdf or self._busy() or self.view.pixmap_item is None:
@@ -1345,6 +1784,7 @@ class Editor(QMainWindow):
         try:
             self._render_visible_pages()
             self.update_selection_preview()
+            self._draw_find_hits()
         except Exception as exc:
             self._error(exc)
 
@@ -1354,7 +1794,7 @@ class Editor(QMainWindow):
         if not self._discard_pending():
             return
         self.page_index = index
-        self.render_page(fit=True, scroll=True)
+        self.render_page(fit=True, scroll=True, refresh_thumbnails=False)
         self._update_pagination()
 
     def _update_pagination(self):
@@ -1364,6 +1804,152 @@ class Editor(QMainWindow):
         ready = bool(count) and not self._busy()
         self.previous_button.setEnabled(ready and self.page_index > 0)
         self.next_button.setEnabled(ready and self.page_index < count - 1)
+        selected = self._selected_pages()
+        self.move_up_action.setEnabled(ready and bool(selected) and selected[0] > 0)
+        self.move_down_action.setEnabled(ready and bool(selected) and selected[-1] < count - 1)
+
+    def _escape(self):
+        if not self.find_bar.isHidden():
+            self._close_find()
+        else:
+            self.cancel_selection()
+
+    def _open_find(self):
+        if not self.pdf or not self.pdf.page_count or self._busy():
+            return
+        if self.find_bar.isHidden():
+            self._position_find()
+            self.find_bar.raise_()
+            self.find_bar.show()
+            self._restart_find()
+        self.find_input.setFocus()
+        self.find_input.selectAll()
+
+    def _position_find(self):
+        self.find_bar.move(self.centralWidget().width() - self.find_bar.width() - 14, self.splitter.y() + 8)
+
+    def _close_find(self):
+        self.find_bar.hide()
+        self._restart_find()
+        self.view.setFocus()
+
+    def _restart_find(self, *_):
+        self._find_timer.stop()
+        self._find_pending.clear()
+        self._find_ocr_pages.clear()
+        self._find_failed_pages.clear()
+        self._find_results.clear()
+        self._find_hit = None
+        if self.pdf and self.pdf.page_count and not self.find_bar.isHidden() and self.find_input.text().strip():
+            count = self.pdf.page_count
+            self._find_pending.extend(range(self.page_index, count))
+            self._find_pending.extend(range(self.page_index))
+            self._find_timer.start(80)
+        self._update_find_status()
+        self._draw_find_hits()
+
+    def _search_page(self, index):
+        query = self.find_input.text().strip()
+        version = self.pdf.page_versions[index]
+        self._find_failed_pages.discard(index)
+        hits = []
+        try:
+            hits = self.pdf.find_text(index, query)
+            if version.ocr_error is not None:
+                self._find_failed_pages.add(index)
+            elif self._needs_ocr(index):
+                self._find_ocr_pages[index] = version
+        except (RuntimeError, ValueError):
+            self._find_failed_pages.add(index)
+        folded = query.casefold()
+        native_centers = [(pymupdf.Rect(box).tl + pymupdf.Rect(box).br) / 2 for fragments in hits for box in fragments]
+        for line in version.ocr or []:
+            box = pymupdf.Rect(line['bbox'])
+            if folded in line['text'].casefold() and not any(point in box for point in native_centers):
+                hits.append((tuple(box),))
+        self._find_results[index] = hits
+
+    def _search_next_pages(self):
+        if not self.pdf or self.find_bar.isHidden():
+            return
+        for _ in range(min(4, len(self._find_pending))):
+            self._search_page(self._find_pending.popleft())
+        if self._find_pending:
+            self._find_timer.start(1)
+        if self._find_ocr_pages and not self.ocr_worker:
+            self.ocr_timer.start(0)
+        self._refresh_find()
+
+    def _find_hits(self):
+        return [(index, fragments) for index, hits in sorted(self._find_results.items()) for fragments in hits]
+
+    def _refresh_find(self):
+        hits = self._find_hits()
+        if hits and self._find_hit not in hits and not self.pending:
+            self._show_find_hit(next((hit for hit in hits if hit[0] >= self.page_index), hits[0]))
+        else:
+            self._update_find_status(hits)
+            self._draw_find_hits()
+
+    def _update_find_status(self, hits=None):
+        hits = self._find_hits() if hits is None else hits
+        self.find_previous.setEnabled(bool(hits))
+        self.find_next.setEnabled(bool(hits))
+        scanning = bool(self._find_pending or self._find_ocr_pages)
+        incomplete = _('Niektoré strany sa nepodarilo prehľadať') if self._find_failed_pages else ''
+        if hits:
+            number = hits.index(self._find_hit) + 1 if self._find_hit in hits else 0
+            status = _('{current} / {total}').format(current=number, total=len(hits))
+            if scanning:
+                status += ' · ' + _('Hľadám…')
+        elif scanning:
+            status = _('Hľadám…')
+        elif incomplete:
+            status = ''
+        elif not self.find_bar.isHidden() and self.find_input.text().strip():
+            status = _('Žiadne výsledky')
+        else:
+            status = ''
+        message = ' · '.join(filter(None, (status, incomplete)))
+        self.find_status.setText(message)
+        self.find_status.setVisible(bool(message))
+        self.find_bar.adjustSize()
+
+    def _find_rect(self, index, box):
+        page = self.view.page_rects[index]
+        rect = pymupdf.Rect(box) * self.pdf.document[index].rotation_matrix
+        return QRectF(page.x() + rect.x0, page.y() + rect.y0, rect.width, rect.height)
+
+    def _draw_find_hits(self):
+        if not self._find_results or not self.view.page_rects:
+            if self.view.find_items:
+                self.view.show_find_hits([])
+            return
+        hits = [(self._find_rect(index, box), (index, fragments) == self._find_hit)
+                for index in self.view.visible_page_indices()
+                for fragments in self._find_results.get(index, ()) for box in fragments]
+        self.view.show_find_hits(hits)
+
+    def _show_find_hit(self, hit):
+        self._find_hit = hit
+        index, fragments = hit
+        if index != self.page_index:
+            self.page_index = index
+            self.render_page(refresh_thumbnails=False)
+        self.view.ensureVisible(self._find_rect(index, fragments[0]), 45, 45)
+        self._draw_find_hits()
+        self._update_find_status()
+
+    def _move_find(self, direction):
+        if self.find_bar.isHidden() or self._busy():
+            return
+        if self.pending:
+            self._discard_pending()
+            return
+        hits = self._find_hits()
+        if hits:
+            current = hits.index(self._find_hit) + direction if self._find_hit in hits else (0 if direction > 0 else -1)
+            self._show_find_hit(hits[current % len(hits)])
 
     def _region_toggled(self, enabled):
         if enabled:
@@ -1399,7 +1985,7 @@ class Editor(QMainWindow):
             self.view.highlight(self.selection['bbox'], transform)
 
     def update_selection_preview(self):
-        if not self.pdf or self.selection is None:
+        if not self.pdf or not self._has_editable_selection():
             self.selection_preview.hide()
             return
         index = self.selection['page_index']
@@ -1416,8 +2002,11 @@ class Editor(QMainWindow):
         painter.setPen(QPen(QColor('#087f83'), max(1, scale)))
         painter.drawRect(QRectF(box.x0 * scale - pix.x, box.y0 * scale - pix.y, box.width * scale, box.height * scale))
         painter.end()
+        form = self.editor_panel.widget()
+        margins = form.layout().contentsMargins()
+        width = max(self.editor_panel.viewport().width(), form.minimumWidth()) - margins.left() - margins.right()
         self.selection_preview.setPixmap(QPixmap.fromImage(image).scaled(
-            max(1, self.selection_preview.width()), self.selection_preview.height(),
+            max(1, width), self.selection_preview.height(),
             Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         self.selection_preview.show()
 
@@ -1441,9 +2030,9 @@ class Editor(QMainWindow):
         self.pending = False
         self.edit_error.hide()
         self.restore_highlight()
-        self.update_selection_preview()
-        self.hint.setText(_('Text sa po dopísaní automaticky zmení v náhľade. Delete na strane vymaže výber. PDF uložíte tlačidlom Uložiť kópiu.'))
+        self.hint.setText(_('Text sa po dopísaní automaticky zmení v náhľade. Delete na strane vymaže výber. PDF uložíte tlačidlom Uložiť PDF.'))
         self._update_actions()
+        self.update_selection_preview()
         self.view.setFocus()
 
     def select_range(self, characters):
@@ -1471,7 +2060,7 @@ class Editor(QMainWindow):
         self.text.blockSignals(False)
         self.restore_highlight()
         self.update_selection_preview()
-        self.hint.setText(_('Označený text vymažete klávesom Delete. Tlačidlom Späť vymazanie vrátite.'))
+        self.statusBar().showMessage(_('Označený text vymažete klávesom Delete. Tlačidlom Späť vymazanie vrátite.'))
         self._update_actions()
         self.view.setFocus()
 
@@ -1481,7 +2070,7 @@ class Editor(QMainWindow):
                 self.restore_highlight()
                 return
             self.selection = {'kind': 'area', 'bbox': bbox, 'page_index': self.page_index,
-                              'source_bbox': bbox, 'source_ocr': list(self.ocr_areas.get(self.page_index, []))}
+                              'source_bbox': bbox, 'source_version': self.pdf.page_versions[self.page_index]}
             self.pending = False
             self.edit_applied = False
             self.text.blockSignals(True)
@@ -1489,7 +2078,7 @@ class Editor(QMainWindow):
             self.text.blockSignals(False)
             self.selection_preview.hide()
             self.edit_error.hide()
-            self.hint.setText(_('Oblasť presuňte, zmeňte jej veľkosť alebo ju odstráňte klávesom Delete.'))
+            self.statusBar().showMessage(_('Oblasť presuňte, zmeňte jej veľkosť alebo ju odstráňte klávesom Delete.'))
             self.restore_highlight()
             self._update_actions()
             self.view.setFocus()
@@ -1515,11 +2104,10 @@ class Editor(QMainWindow):
             self.restore_highlight()
             self._error(exc)
             return
-        affected = (pymupdf.Rect(original), pymupdf.Rect(bbox))
-        self.ocr_areas[index] = [s for s in self.selection['source_ocr'] if not any(rect.intersects(pymupdf.Rect(s['bbox'])) for rect in affected)]
         self.selection['baseline'] = baseline
         self.selection['bbox'] = bbox
-        self.render_page()
+        affected = () if pymupdf.Rect(original) == pymupdf.Rect(bbox) else (original, bbox)
+        self._page_edited(index, self.selection['source_version'].ocr, *affected)
         self.statusBar().showMessage(_('Oblasť bola upravená. Zmenu môžete vrátiť tlačidlom Späť.'))
 
     def cancel_selection(self, checked=False):
@@ -1557,6 +2145,7 @@ class Editor(QMainWindow):
             return False
         self.auto_apply_timer.stop()
         index = self.selection['page_index']
+        previous_ocr = self.pdf.page_versions[index].ocr
         try:
             self.pdf.replace_text(index, self.selection['bbox'], self.text.toPlainText(), self.font_size.currentData(), self.selection.get('color', 0), self.white_background.isChecked(), update_previous=self.edit_applied, insert_only=self.selection.get('insert_only', False))
         except Exception as exc:
@@ -1565,13 +2154,11 @@ class Editor(QMainWindow):
             if not automatic:
                 self._error(exc)
             return False
-        rect = pymupdf.Rect(self.selection['bbox'])
-        self.ocr_areas[index] = [s for s in self.ocr_areas.get(index, []) if not rect.intersects(pymupdf.Rect(s['bbox']))]
         self.pending = False
         self.edit_applied = True
         self.edit_error.hide()
-        self.render_page()
-        self.statusBar().showMessage(_('Náhľad sa automaticky aktualizoval. PDF uložíte tlačidlom Uložiť kópiu.'))
+        self._page_edited(index, previous_ocr, self.selection['bbox'])
+        self.statusBar().showMessage(_('Náhľad sa automaticky aktualizoval. PDF uložíte tlačidlom Uložiť PDF.'))
         return True
 
     def delete_selection(self):
@@ -1579,11 +2166,12 @@ class Editor(QMainWindow):
             return
         self.auto_apply_timer.stop()
         index = self.selection['page_index']
+        previous_ocr = self.pdf.page_versions[index].ocr
         try:
             if self.selection.get('kind') == 'area':
                 if 'baseline' in self.selection:
                     self.pdf.transform_region(index, self.selection['source_bbox'], None, self.selection['baseline'])
-                    self.ocr_areas[index] = self.selection['source_ocr']
+                    previous_ocr = self.selection['source_version'].ocr
                 else:
                     self.pdf.cover_region(index, self.selection['bbox'])
             elif 'characters' in self.selection:
@@ -1596,11 +2184,28 @@ class Editor(QMainWindow):
         except Exception as exc:
             self._error(exc)
             return
-        rect = pymupdf.Rect(self.selection.get('source_bbox', self.selection['bbox']))
-        self.ocr_areas[index] = [s for s in self.ocr_areas.get(index, []) if not rect.intersects(pymupdf.Rect(s['bbox']))]
+        box = self.selection.get('source_bbox', self.selection['bbox'])
         self.clear_selection()
-        self.render_page()
+        self._page_edited(index, previous_ocr, box)
         self.statusBar().showMessage(_('Výber bol vymazaný. Vymazanie vrátite tlačidlom Späť alebo Ctrl+Z.'))
+
+    def _page_edited(self, index, previous_ocr, *boxes):
+        if previous_ocr is not None:
+            affected = [pymupdf.Rect(box) for box in boxes]
+            self.pdf.page_versions[index].ocr = [line for line in previous_ocr if not any(
+                rect.intersects(pymupdf.Rect(line['bbox'])) for rect in affected)]
+        self._restart_find()
+        self.render_page()
+
+    def _navigate_history(self, operation):
+        before = self.pdf.page_versions
+        version = before[self.page_index] if before else None
+        if not operation():
+            return False
+        index = self.pdf.page_versions.index(version) if version in self.pdf.page_versions else self.page_index
+        self._pages_changed(index, scroll=index != self.page_index or self.pdf.page_count != len(self.view.page_rects))
+        self.thumbnails.animate_reorder(before, self.pdf.page_versions)
+        return True
 
     def undo(self):
         if not self.pdf or self._busy():
@@ -1610,19 +2215,17 @@ class Editor(QMainWindow):
             self.clear_selection()
             self.render_page()
             return
-        if self.pdf.undo():
-            self._pages_changed(self.page_index, scroll=self.pdf.page_count != len(self.view.page_rects))
+        if self._navigate_history(self.pdf.undo):
             self.statusBar().showMessage(_('Posledná zmena bola vrátená späť.'))
 
     def redo(self):
         if not self.pdf or self._busy() or not self.pdf.can_redo:
             return
         self.auto_apply_timer.stop()
-        if self.pdf.redo():
-            self._pages_changed(self.page_index, scroll=self.pdf.page_count != len(self.view.page_rects))
+        if self._navigate_history(self.pdf.redo):
             self.statusBar().showMessage(_('Zmena bola znovu vykonaná.'))
 
-    def save_copy(self):
+    def save_copy(self, *, searchable=False):
         if not self.pdf or self._busy():
             return False
         if not self.pdf.page_count:
@@ -1636,13 +2239,25 @@ class Editor(QMainWindow):
         while target.exists():
             target = self.pdf.source.with_name(f'{self.pdf.source.stem}_{suffix}_{number}.pdf')
             number += 1
-        filename, selected_filter = QFileDialog.getSaveFileName(self, _('Uložiť novú PDF kópiu'), str(target), 'PDF (*.pdf)', options=QFileDialog.Option.DontConfirmOverwrite)
+        title = _('Uložiť ako prehľadávateľné PDF…') if searchable else _('Uložiť PDF')
+        filename, selected_filter = QFileDialog.getSaveFileName(self, title, str(target), 'PDF (*.pdf)', options=QFileDialog.Option.DontConfirmOverwrite)
         if not filename:
             return False
         if not filename.lower().endswith('.pdf'):
             filename += '.pdf'
         try:
-            self.pdf.save_copy(filename)
+            replacing = self.pdf.source.suffix.casefold() == '.pdf' and Path(filename).resolve() == self.pdf.source
+            if replacing:
+                answer = QMessageBox.question(self, _('Nahradiť pôvodné PDF?'),
+                                              _('Nahradiť pôvodný súbor {filename} upraveným PDF?').format(filename=self.pdf.source.name),
+                                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                              QMessageBox.StandardButton.No)
+                if answer != QMessageBox.StandardButton.Yes:
+                    return False
+            searchable = searchable or (replacing and self.pdf.searchable_source)
+            if searchable and not self._prepare_searchable():
+                return False
+            self.pdf.save_copy(filename, replace_source=replacing, searchable=searchable)
         except Exception as exc:
             self._error(exc)
             return False
@@ -1650,64 +2265,159 @@ class Editor(QMainWindow):
         self.statusBar().showMessage(_('Uložené: {filename}').format(filename=filename))
         return True
 
-    def _auto_ocr(self, document, index):
-        if self._closing_after_update:
-            return
-        if self._install_pending and self.pdf is document:
-            QTimer.singleShot(500, lambda: self._auto_ocr(document, index))
-            return
-        if self.pdf is document and self.page_index == index and not self._busy():
-            self.start_ocr()
-        elif self.pdf is document:
-            self.ocr_attempted.discard(index)
-
-    def start_ocr(self):
-        if not self.pdf or self._busy() or not self._discard_pending():
-            return
-        self.ocr_attempted.add(self.page_index)
-        self.ocr_temp = tempfile.TemporaryDirectory(prefix='faktura-ocr-')
-        path = Path(self.ocr_temp.name) / 'page.png'
+    def _prepare_searchable(self):
+        self._searchable_pages.extend(range(self.pdf.page_count))
+        self._searchable_error = None
+        for version in self.pdf.page_versions:
+            version.ocr_error = None
+        progress = QProgressDialog(_('Pripravujem prehľadávateľné PDF…'), _('Zrušiť'), 0, self.pdf.page_count, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        self._searchable_progress = progress
+        self.ocr_timer.start(0)
         try:
-            page = self.pdf.document[self.page_index]
-            self.ocr_scale = min(3.0, 3500 / max(page.rect.width, page.rect.height))
-            self.pdf.render(self.page_index, self.ocr_scale).save(path)
-        except Exception as exc:
-            self.ocr_temp.cleanup()
-            self.ocr_temp = None
-            self._error(exc)
+            accepted = progress.exec() == QProgressDialog.DialogCode.Accepted
+        finally:
+            self._searchable_progress = None
+            self._searchable_pages.clear()
+            progress.deleteLater()
+            self._update_actions()
+        if not accepted and self.ocr_worker:
+            self.ocr_worker.requestInterruption()
+        if self._searchable_error:
+            raise ValueError(self._searchable_error)
+        return accepted
+
+    def _needs_ocr(self, index, native=None):
+        version = self.pdf.page_versions[index]
+        if version.ocr is not None or version.ocr_error is not None:
+            return False
+        if version.needs_ocr is None:
+            if native is None:
+                native = self.pdf.spans(index)
+            page = self.pdf.document[index]
+            bounds = page.rect * page.derotation_matrix
+            # Edited scans can contain native text over the original full-page image.
+            version.needs_ocr = not native or any(
+                (bounds & pymupdf.Rect(image['bbox'])).get_area() >= bounds.get_area() * 0.8
+                for image in page.get_image_info())
+        return version.needs_ocr
+
+    def _start_next_ocr(self):
+        if not self.pdf or not self.pdf.page_count or self.ocr_worker or self._closing_after_update:
             return
-        self.ocr_worker = OcrWorker(path, self)
-        self.ocr_worker.completed.connect(self._ocr_completed)
-        self.ocr_worker.failed.connect(self._ocr_failed)
-        self.ocr_worker.finished.connect(self._ocr_finished)
-        self._update_actions()
-        self.statusBar().showMessage(_('Rozpoznávam text tejto strany pomocou Windows OCR…'))
-        self.ocr_worker.start()
+        if self._searchable_progress is not None:
+            self._advance_searchable()
+            return
+        if self._install_pending:
+            return
+        index = self.page_index if self._needs_ocr(self.page_index) else next(iter(self._find_ocr_pages), None)
+        if index is not None:
+            self._auto_ocr(self.pdf, index)
+
+    def _advance_searchable(self):
+        progress = self._searchable_progress
+        if progress.wasCanceled():
+            return
+        if not self._searchable_pages:
+            progress.accept()
+            return
+        index = self._searchable_pages[0]
+        try:
+            version = self.pdf.page_versions[index]
+            if version.ocr_error is not None:
+                raise ValueError(version.ocr_error)
+            if self._needs_ocr(index):
+                self._auto_ocr(self.pdf, index)
+                return
+        except Exception as exc:
+            self._searchable_error = _('Stranu {page} sa nepodarilo prehľadať. {error}').format(page=index + 1, error=exc)
+            progress.reject()
+            return
+        self._searchable_pages.popleft()
+        progress.setValue(self.pdf.page_count - len(self._searchable_pages))
+        self.ocr_timer.start(0)
+
+    def _auto_ocr(self, document, index):
+        if self.pdf is not document or self.ocr_worker or not self._needs_ocr(index):
+            return
+        try:
+            worker = OcrWorker(document, index, self)
+        except Exception as exc:
+            document.page_versions[index].ocr_error = str(exc)
+            self._find_ocr_pages.pop(index, None)
+            if index in self._find_results:
+                self._find_failed_pages.add(index)
+            self.statusBar().showMessage(_('Automatické rozpoznanie textu zlyhalo: {message}').format(message=exc))
+            self._update_find_status()
+            self.ocr_timer.start(0)
+            return
+        self.ocr_worker = worker
+        worker.completed.connect(self._ocr_completed)
+        worker.failed.connect(self._ocr_failed)
+        worker.finished.connect(self._ocr_finished)
+        if index == self.page_index:
+            self.statusBar().showMessage(_('Rozpoznávam text tejto strany pomocou Windows OCR…'))
+        worker.start()
 
     def _ocr_completed(self, lines):
-        page = self.pdf.document[self.page_index]
-        native = self.pdf.spans(self.page_index)
+        worker = self.sender()
+        if worker is None or worker is not self.ocr_worker or worker.isInterruptionRequested():
+            return
         areas = []
         for line in lines:
-            rect = pymupdf.Rect([value / self.ocr_scale for value in line['bbox']]) * page.derotation_matrix
-            rect = pymupdf.Rect(rect.x0 - 1, rect.y0 - 2, rect.x1 + 1, rect.y1 + 2) & (page.rect * page.derotation_matrix)
-            if rect.is_empty or any(rect.intersects(pymupdf.Rect(s['bbox'])) for s in native):
+            image_rect = pymupdf.Rect([value / worker.scale for value in line['bbox']])
+            rect = image_rect * worker.derotation
+            rect = pymupdf.Rect(rect.x0 - 1, rect.y0 - 2, rect.x1 + 1, rect.y1 + 2) & worker.bounds
+            if rect.is_empty or any(rect.intersects(box) for box in worker.native):
                 continue
-            areas.append({'text': line['text'], 'bbox': tuple(rect), 'size': max(4, (rect.height - 4) * 0.9), 'color': 0})
-        self.ocr_areas[self.page_index] = areas
-        self.render_page()
-        self.statusBar().showMessage(_('OCR dokončené: {count} oblastí zo skenu. Kliknite na text; rozpoznané údaje pred uložením skontrolujte.').format(count=len(areas)))
+            areas.append({'text': line['text'], 'bbox': tuple(rect), 'size': max(4, image_rect.height * 0.9),
+                          'color': 0, 'rotation': worker.rotation})
+        worker.version.ocr = areas
+        self._ocr_page_updated(worker)
+        if self.pdf is worker.document and self.pdf.page_count and worker.version is self.pdf.page_versions[self.page_index]:
+            self.render_page(refresh_thumbnails=False)
+            self.statusBar().showMessage(_('OCR dokončené: {count} oblastí zo skenu. Kliknite na text; rozpoznané údaje pred uložením skontrolujte.').format(count=len(areas)))
+
+    def _ocr_page_updated(self, worker):
+        if self.pdf is worker.document and worker.version in self.pdf.page_versions:
+            index = self.pdf.page_versions.index(worker.version)
+            self._find_ocr_pages.pop(index, None)
+            if index in self._find_results:
+                self._search_page(index)
+            self._refresh_find()
 
     def _ocr_failed(self, message):
+        worker = self.sender()
+        if worker is not None:
+            if worker is not self.ocr_worker or worker.isInterruptionRequested():
+                return
+            worker.version.ocr_error = message
+            self._ocr_page_updated(worker)
+            if not self.pdf or not self.pdf.page_count or self.pdf.page_versions[self.page_index] is not worker.version:
+                return
         self.hint.setText(_('Text sa nepodarilo automaticky rozpoznať. Môžete pridať textové pole alebo zakryť oblasť.'))
         self.statusBar().showMessage(_('Automatické rozpoznanie textu zlyhalo: {message}').format(message=message))
 
     def _ocr_finished(self):
-        self.ocr_worker.deleteLater()
+        worker = self.sender()
+        if worker is None or worker is not self.ocr_worker:
+            return
         self.ocr_worker = None
-        self.ocr_temp.cleanup()
-        self.ocr_temp = None
-        self._update_actions()
+        worker.temp.cleanup()
+        worker.deleteLater()
+        self.ocr_timer.start(0)
+
+    def _stop_ocr(self):
+        self.ocr_timer.stop()
+        if self.ocr_worker:
+            worker, self.ocr_worker = self.ocr_worker, None
+            worker.requestInterruption()
+            worker.wait()
+            worker.temp.cleanup()
+            worker.deleteLater()
 
     def show_about(self):
         QMessageBox.about(self, _('O aplikácii {name}').format(name=APP_NAME),
@@ -1786,6 +2496,7 @@ class Editor(QMainWindow):
                 self._launch_update()
             self._install_pending = False
             self._verified_update = None
+            self.ocr_timer.start(0)
         elif self.ready_update is not None and not skip_offer:
             self._offer_update()
 
@@ -1806,6 +2517,7 @@ class Editor(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if answer != QMessageBox.StandardButton.Yes or self._busy() or not self._leave_document():
             self._install_pending = False
+            self.ocr_timer.start(0)
             return
         self.centralWidget().setEnabled(False)
         self.check_updates_action.setEnabled(False)
@@ -1840,6 +2552,8 @@ class Editor(QMainWindow):
             self.auto_apply_timer.stop()
             self.scroll_sync_timer.stop()
             self.view.raster_timer.stop()
+            self._find_timer.stop()
+            self._stop_ocr()
             if self.update_worker is not None:
                 self._close_approved = True
                 self._closing_after_update = True
@@ -1862,8 +2576,10 @@ STYLE = '''
 QWidget { font-family: "Segoe UI"; font-size: 13px; color: #243642; }
 QMainWindow, QDialog, #panel { background: #ffffff; }
 QToolTip { background: #ffffff; color: #243642; border: 1px solid #cad5dc; padding: 5px 8px; }
-#brand { font-size: 13px; font-weight: 600; padding-right: 8px; }
 #tools { background: #f2f4f6; border-bottom: 1px solid #d4dce2; }
+#findBar { background: #ffffff; border: 1px solid #dce3e8; border-radius: 9px; }
+#findInput { padding: 4px 8px; }
+#findStatus { color: #5e6f79; font-size: 12px; padding-left: 6px; }
 #toolbarSeparator { background: #d4dce2; }
 #muted { color: #5e6f79; }
 #filename { color: #64737e; }
@@ -1890,6 +2606,9 @@ QPushButton:disabled, QPushButton#primary:disabled { color: #8b9aa3; background:
 QPushButton:focus, QTextEdit:focus, QComboBox:focus { border: 2px solid #087f83; }
 QToolButton { border: 1px solid transparent; border-radius: 2px; background: transparent; padding: 3px; }
 QToolButton:hover, QToolButton:focus { border-color: #087f83; background: #eef5f5; }
+#tools QToolButton { padding: 2px; }
+#tools QToolButton:!checked:hover, #tools QToolButton:!checked:focus { border-color: transparent; background: transparent; }
+#tools QToolButton:!checked:focus:!hover { background: #dce3e8; }
 QToolButton:checked { border-color: #087f83; background: #dcefee; }
 QToolButton:disabled { border-color: transparent; background: transparent; }
 QToolButton::menu-indicator { image: none; }
@@ -1956,7 +2675,8 @@ def apply_light_theme(application):
 
 def smoke_test(application, output):
     result = {'app_name': APP_NAME, 'version': VERSION, 'frozen': bool(getattr(sys, 'frozen', False)),
-              'qt_platform': application.platformName(), 'resources_ok': False, 'pdf_render_ok': False}
+              'qt_platform': application.platformName(), 'mupdf_version': pymupdf.VersionFitz,
+              'resources_ok': False, 'pdf_render_ok': False, 'ocr_ok': False}
     try:
         root = Path(__file__).resolve().parent
         result['resources_ok'] = all((root / path).is_file() for path in
@@ -1979,12 +2699,19 @@ def smoke_test(application, output):
             editor.pdf.close()
             editor.pdf = None
             editor.close()
+            scan = Path(directory) / 'scan.png'
+            with pymupdf.open() as document:
+                page = document.new_page(width=420, height=140)
+                page.insert_text((36, 80), 'INVOICE 12345', fontsize=32)
+                page.get_pixmap(matrix=pymupdf.Matrix(2, 2)).save(scan)
+            lines = recognize(scan)
+            result['ocr_ok'] = any('12345' in line['text'] and pymupdf.Rect(line['bbox']).get_area() > 0 for line in lines)
         result['resources_ok'] = result['resources_ok'] and not QIcon(str(APP_ICON)).isNull()
     except Exception as exc:
         result['error'] = str(exc)
     if output:
         Path(output).write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
-    return 0 if result['resources_ok'] and result['pdf_render_ok'] else 1
+    return 0 if result['resources_ok'] and result['pdf_render_ok'] and result['ocr_ok'] else 1
 
 
 def main():
