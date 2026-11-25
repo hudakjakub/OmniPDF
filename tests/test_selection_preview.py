@@ -46,7 +46,7 @@ class SelectionPreviewTests(unittest.TestCase):
                 window.clear_selection()
                 self.assertTrue(window.selection_preview.isHidden())
                 window.select_range(window.pdf.characters(0)[:3])
-                self.assertFalse(window.selection_preview.isHidden())
+                self.assertTrue(window.selection_preview.isHidden())
                 window.clear_selection()
                 self.assertTrue(window.selection_preview.isHidden())
             finally:

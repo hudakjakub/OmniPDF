@@ -79,14 +79,16 @@ class UpdateUiTests(unittest.TestCase):
             self.wait_for_worker()
         self.assertEqual(self.window.ready_update, (self.release, None))
         download.assert_not_called()
-        with patch.object(QMessageBox, 'question', side_effect=[QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Cancel]), \
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
+             patch.object(QMessageBox, 'exec', return_value=QMessageBox.StandardButton.Cancel), \
              patch('omnipdf.main.updates.launch_installer') as launch:
             self.window._offer_update()
             launch.assert_not_called()
         self.assertTrue(self.window.pending)
         self.assertTrue(self.window.isVisible())
         output = self.root / 'copy.pdf'
-        with patch.object(QMessageBox, 'question', side_effect=[QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Save]), \
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
+             patch.object(QMessageBox, 'exec', return_value=QMessageBox.StandardButton.Save), \
              patch.object(QFileDialog, 'getSaveFileName', return_value=(str(output), 'PDF')), \
              patch('omnipdf.main.updates.download_update', return_value=self.installer) as download, \
              patch('omnipdf.main.updates.launch_installer') as launch:
@@ -171,7 +173,8 @@ class UpdateUiTests(unittest.TestCase):
         self.window.select_text(self.window.pdf.spans(0)[0])
         self.window.text.setPlainText('Draft text')
         self.window.ready_update = (self.release, self.installer)
-        with patch.object(QMessageBox, 'question', side_effect=[QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Discard]), \
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
+             patch.object(QMessageBox, 'exec', return_value=QMessageBox.StandardButton.Discard), \
              patch('omnipdf.main.updates.launch_installer') as launch:
             self.window._offer_update()
             self.wait_for_worker()
@@ -181,16 +184,18 @@ class UpdateUiTests(unittest.TestCase):
     def test_queued_ocr_is_deferred_during_update_prompt(self):
         source = self.root / 'source.pdf'
         with pymupdf.open() as document:
-            document.new_page().insert_text((50, 80), 'Original text', fontsize=12)
+            document.new_page()
             document.save(source)
         self.window.open_file(path=source)
         self.window.ready_update = (self.release, self.installer)
         def answer(*args):
-            self.window._auto_ocr(self.window.pdf, self.window.page_index)
+            self.window._start_next_ocr()
             return QMessageBox.StandardButton.No
-        with patch.object(self.window, 'start_ocr') as ocr, patch.object(QMessageBox, 'question', side_effect=answer):
+        with patch.object(self.window, '_auto_ocr') as ocr, patch.object(QMessageBox, 'question', side_effect=answer):
             self.window._offer_update()
             ocr.assert_not_called()
+            self.app.processEvents()
+            ocr.assert_called_once_with(self.window.pdf, 0)
         self.assertFalse(self.window._close_approved)
         self.assertFalse(self.window._install_pending)
 
@@ -229,9 +234,11 @@ class UpdateUiTests(unittest.TestCase):
         def verify(*args):
             started.set()
             gate.wait(2)
-        answers = [QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.Discard, QMessageBox.StandardButton.Cancel]
+        answers = [QMessageBox.StandardButton.Discard, QMessageBox.StandardButton.Cancel]
         with patch('omnipdf.main.updates.verify_installer', side_effect=verify), \
-             patch('omnipdf.main.updates.launch_installer') as launch, patch.object(QMessageBox, 'question', side_effect=answers):
+             patch('omnipdf.main.updates.launch_installer') as launch, \
+             patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes), \
+             patch.object(QMessageBox, 'exec', side_effect=answers):
             self.window._offer_update()
             try:
                 self.assertTrue(started.wait(1))

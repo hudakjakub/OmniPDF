@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -26,6 +27,105 @@ class PdfDocumentTests(unittest.TestCase):
     def tearDown(self):
         self.pdf.close()
         self.temp.cleanup()
+
+    def test_recovers_a_pdf_with_a_missing_xref_stream_size(self):
+        broken = self.root / 'recoverable.pdf'
+        with pymupdf.open(self.source) as original:
+            data = original.tobytes(use_objstms=1)
+        self.assertEqual(data.count(b'/Size '), 1)
+        damaged = data.replace(b'/Size ', b'/Lost ')
+        broken.write_bytes(damaged)
+        with pymupdf.open(broken) as check:
+            self.assertTrue(check.is_repaired)
+        recovered = PdfDocument(broken)
+        try:
+            self.assertTrue(recovered.recovered)
+            self.assertFalse(recovered.dirty)
+            self.assertFalse(recovered.document.is_repaired)
+            self.assertEqual(recovered.page_count, 2)
+            self.assertEqual(recovered.render(0).samples, self.pdf.render(0).samples)
+            self.assertIn('Second page', recovered.document[1].get_text())
+            output = self.root / 'recovered.pdf'
+            recovered.save_copy(output)
+            with pymupdf.open(output) as saved:
+                self.assertFalse(saved.is_repaired)
+                self.assertEqual(saved.page_count, 2)
+            self.assertEqual(broken.read_bytes(), damaged)
+        finally:
+            recovered.close()
+
+    def test_confirmed_replace_preserves_undo_and_checks_external_changes(self):
+        span = self.pdf.spans(0)[0]
+        self.pdf.replace_text(0, span['bbox'], 'New text', fontsize=span['size'])
+        before = self.source.read_bytes()
+        with patch('omnipdf.pdf_document.os.replace', side_effect=PermissionError('busy')):
+            with self.assertRaisesRegex(PermissionError, 'busy'):
+                self.pdf.save_copy(self.source, replace_source=True)
+        self.assertEqual(self.source.read_bytes(), before)
+        self.assertTrue(self.pdf.dirty)
+        self.assertEqual(list(self.root.glob('.pdf-editor-*')), [])
+        self.pdf.save_copy(self.source, replace_source=True)
+        self.assertFalse(self.pdf.dirty)
+        with pymupdf.open(self.source) as saved:
+            self.assertIn('New text', saved[0].get_text())
+        self.assertTrue(self.pdf.undo())
+        stamp = self.source.stat()
+        os.utime(self.source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 2_000_000_000))
+        with self.assertRaisesRegex(ValueError, 'changed on disk'):
+            self.pdf.save_copy(self.source, replace_source=True)
+        with pymupdf.open(self.source) as saved:
+            self.assertIn('New text', saved[0].get_text())
+
+    def test_searchable_save_keeps_pixels_and_preserves_ocr_on_resave(self):
+        before = self.pdf.render(0).samples
+        self.pdf.page_versions[0].ocr = [{'text': 'Žltý dokument 12345', 'bbox': (35, 122, 225, 145), 'size': 13}]
+        self.pdf.save_copy(self.source, replace_source=True, searchable=True)
+        for _ in range(2):
+            with pymupdf.open(self.source) as saved:
+                self.assertIn('Žltý dokument 12345', saved[0].get_text())
+                self.assertEqual(before, saved[0].get_pixmap(matrix=pymupdf.Matrix(1.5, 1.5)).samples)
+            self.pdf.save_copy(self.source, replace_source=True)
+        reopened = PdfDocument(self.source)
+        try:
+            text = self.pdf.page_versions[0].ocr[0]['text']
+            self.assertNotIn(text, [span['text'] for span in reopened.spans(0)])
+            reopened.page_versions[0].ocr = self.pdf.page_versions[0].ocr
+            output = self.root / 'searchable-again.pdf'
+            reopened.save_copy(output, searchable=True)
+            with pymupdf.open(output) as saved:
+                self.assertEqual(saved[0].get_text().count(text), 1)
+        finally:
+            reopened.close()
+
+    def test_batch_page_changes_preserve_order_and_each_undo_as_one_step(self):
+        self.pdf.insert_pdf(self.source, 1)
+        versions = self.pdf.page_versions.copy()
+        self.assertEqual(self.pdf.move_pages([0, 2], 4), 2)
+        self.assertEqual(self.pdf.page_versions, [versions[i] for i in (1, 3, 0, 2)])
+        self.pdf.page_versions[2].ocr = []
+        self.pdf.rotate_pages([2, 3], 90)
+        self.assertEqual([page.rotation for page in self.pdf.document], [0, 0, 90, 90])
+        self.assertIsNone(self.pdf.page_versions[2].ocr)
+        self.pdf.delete_pages([1, 2])
+        self.assertEqual(self.pdf.page_count, 2)
+        self.assertTrue(self.pdf.undo())
+        self.assertEqual([page.rotation for page in self.pdf.document], [0, 0, 90, 90])
+        self.assertTrue(self.pdf.undo())
+        self.assertEqual(self.pdf.page_versions, [versions[i] for i in (1, 3, 0, 2)])
+        self.assertTrue(self.pdf.undo())
+        self.assertEqual(self.pdf.page_versions, versions)
+
+    def test_searchable_layer_preserves_page_rotation(self):
+        self.pdf.rotate_pages([0], 90)
+        self.pdf.page_versions[0].ocr = [{'text': 'Rotated scan 12345', 'bbox': (100, 100, 130, 235),
+                                          'size': 12, 'rotation': 90}]
+        before = self.pdf.render(0).samples
+        output = self.root / 'rotated-searchable.pdf'
+        self.pdf.save_copy(output, searchable=True)
+        with pymupdf.open(output) as saved:
+            self.assertEqual(saved[0].rotation, 90)
+            self.assertIn('Rotated scan 12345', saved[0].get_text())
+            self.assertEqual(before, saved[0].get_pixmap(matrix=pymupdf.Matrix(1.5, 1.5)).samples)
 
     def test_page_operations_preserve_content_and_history(self):
         source_bytes = self.source.read_bytes()
@@ -483,6 +583,80 @@ class PdfDocumentTests(unittest.TestCase):
         self.assertIn('New', self.pdf.document[0].get_text())
         self.assertNotIn('Old text', self.pdf.document[0].get_text())
 
+    def test_vertical_text_replacement_erases_the_whole_span_and_keeps_direction(self):
+        path = self.root / 'vertical.pdf'
+        with pymupdf.open() as doc:
+            for angle in (90, 270):
+                page = doc.new_page(width=300, height=280)
+                page.insert_text((95, 125), 'ABCDE', fontsize=12, rotate=angle)
+                page.insert_text((180, 70), 'Neighbor', fontsize=12)
+            doc.save(path)
+        pdf = PdfDocument(path)
+        try:
+            for index, direction in enumerate(((0, -1), (0, 1))):
+                span = pdf.spans(index)[0]
+                pdf.replace_text(index, span['bbox'], 'XYZ', fontsize=span['size'])
+                lines = {span['text']: tuple(line['dir']) for block in pdf.document[index].get_text('dict')['blocks']
+                         for line in block.get('lines', ()) for span in line['spans']}
+                self.assertEqual(lines, {'XYZ': direction, 'Neighbor': (1, 0)})
+        finally:
+            pdf.close()
+
+    def test_replacement_uses_font_fallback_and_rejects_unrenderable_characters(self):
+        original = self.pdf.spans(0)[0]
+        with self.assertRaisesRegex(ValueError, 'cannot be rendered'):
+            self.pdf.replace_text(0, original['bbox'], '\U0010ffff', fontsize=original['size'])
+        self.assertIn(original['text'], self.pdf.document[0].get_text())
+        self.assertFalse(self.pdf.can_undo)
+        text = '中文測試'
+        self.pdf.replace_text(0, original['bbox'], text, fontsize=original['size'])
+        target = self.root / 'characters.pdf'
+        self.pdf.save_copy(target)
+        with pymupdf.open(target) as saved:
+            self.assertIn(text, saved[0].get_text())
+            self.assertNotIn(original['text'], saved[0].get_text())
+
+    def test_duplicate_keeps_links_to_pages_before_and_after_it(self):
+        source = self.root / 'links.pdf'
+        with pymupdf.open() as doc:
+            for label in ('Earlier', 'Page to duplicate', 'Later'):
+                doc.new_page().insert_text((30, 60), label)
+            page = doc[1]
+            for target in range(3):
+                y = 80 + 25 * target
+                page.insert_link({'kind': pymupdf.LINK_GOTO, 'from': pymupdf.Rect(30, y, 110, y + 15), 'page': target})
+            doc.save(source)
+        pdf = PdfDocument(source)
+        try:
+            pdf.duplicate_page(1)
+            target = self.root / 'copied-links.pdf'
+            pdf.save_copy(target)
+            with pymupdf.open(target) as saved:
+                self.assertEqual(sorted(link['page'] for link in saved[1].get_links()), [0, 1, 3])
+                self.assertEqual(sorted(link['page'] for link in saved[2].get_links()), [0, 2, 3])
+        finally:
+            pdf.close()
+
+    def test_history_budget_keeps_latest_step_and_coalesces_large_edits(self):
+        self.pdf.HISTORY_LIMIT_BYTES = len(self.pdf.document.tobytes()) * 3
+        for _ in range(6):
+            self.pdf.move_page(0, 1)
+        self.assertGreater(len(self.pdf._undo), 1)
+        self.assertLess(len(self.pdf._undo), 6)
+        for operation in (self.pdf.undo, self.pdf.redo):
+            self.assertTrue(operation())
+            self.assertLessEqual(sum(len(state[0]) for stack in (self.pdf._undo, self.pdf._redo) for state in stack),
+                                 self.pdf.HISTORY_LIMIT_BYTES)
+
+        self.pdf.HISTORY_LIMIT_BYTES = 1
+        span = self.pdf.spans(0)[0]
+        self.pdf.replace_text(0, span['bbox'], 'New', fontsize=span['size'])
+        self.pdf.replace_text(0, span['bbox'], 'Latest', fontsize=span['size'], update_previous=True)
+        self.assertIn('Latest', self.pdf.document[0].get_text())
+        self.assertEqual(len(self.pdf._undo), 1)
+        self.assertTrue(self.pdf.undo())
+        self.assertIn(span['text'], self.pdf.document[0].get_text())
+
     def test_native_text_cannot_grow_outside_its_row(self):
         span = self.pdf.spans(0)[0]
         with self.assertRaises(ValueError):
@@ -490,7 +664,7 @@ class PdfDocumentTests(unittest.TestCase):
         self.assertIn('Old text', self.pdf.document[0].get_text())
         self.assertFalse(self.pdf.dirty)
 
-    def test_scan_pixels_are_removed(self):
+    def test_explicit_white_fill_removes_scan_pixels(self):
         # A black image simulates ink in a scanned document.
         pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 100, 100), False)
         pix.clear_with(0)
@@ -498,7 +672,7 @@ class PdfDocumentTests(unittest.TestCase):
         pix.save(path)
         scan = PdfDocument(path)
         try:
-            scan.replace_text(0, (10, 10, 65, 40), 'A', fontsize=10)
+            scan.replace_text(0, (10, 10, 65, 40), 'A', fontsize=10, background=True)
             rendered = scan.render(0, 1)
             self.assertGreater(rendered.pixel(60, 30)[0], 240)
             self.assertLess(rendered.pixel(5, 5)[0], 10)

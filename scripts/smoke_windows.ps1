@@ -15,8 +15,8 @@ function Test-SmokeResult([string]$Path) {
     while (!(Test-Path -LiteralPath $Path) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 100 }
     if (!(Test-Path -LiteralPath $Path)) { throw "Missing smoke result: $Path" }
     $result = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    if (!$result.frozen -or !$result.resources_ok -or !$result.pdf_render_ok -or $result.qt_platform -ne 'windows') {
-        throw "Invalid smoke result: $Path"
+    if (!$result.frozen -or !$result.resources_ok -or !$result.pdf_render_ok -or !$result.ocr_ok -or $result.qt_platform -ne 'windows') {
+        throw "Invalid smoke result: $($result | ConvertTo-Json -Compress)"
     }
 }
 

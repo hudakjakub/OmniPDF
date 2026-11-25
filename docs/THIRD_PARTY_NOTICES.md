@@ -10,9 +10,9 @@ https://github.com/hudakjakub/OmniPDF
 
 ## PyMuPDF and MuPDF
 
-PyMuPDF 1.26.7 and its MuPDF engine are used under the GNU AGPL v3 terms.
+PyMuPDF 1.28.2 and its MuPDF engine are used under the GNU AGPL v3 terms.
 Copyright Artifex Software, Inc. and other contributors.
-https://github.com/pymupdf/PyMuPDF/tree/1.26.7
+https://github.com/pymupdf/PyMuPDF/tree/1.28.2
 https://github.com/ArtifexSoftware/mupdf
 The unmodified AGPL license text is included in LICENSE. Upstream notices and
 licenses are also collected from the build dependencies in the binary bundle.

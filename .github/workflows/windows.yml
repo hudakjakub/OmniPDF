@@ -31,8 +31,13 @@ jobs:
         run: python -m pip install -r requirements/runtime.txt -r requirements/build.txt
       - name: Tlačový komponent
         run: dotnet build windows_print/WindowsPrint.csproj -c Release -p:Platform=x64
+      - name: Prepare Windows OCR
+        shell: powershell
+        run: ./scripts/ensure_windows_ocr.ps1
       - name: Automatické testy
         run: python -m unittest discover -v
+        env:
+          RUN_WINDOWS_OCR: '1'
       - name: Verzia a release tag
         run: python scripts/build_windows.py --validate
         env:
@@ -62,6 +67,9 @@ jobs:
         run: python scripts/build_windows.py
         env:
           RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+      - name: Prepare Windows OCR
+        shell: powershell
+        run: ./scripts/ensure_windows_ocr.ps1
       - name: Overenie inštalácie a aktualizácie
         shell: pwsh
         run: ./scripts/smoke_windows.ps1

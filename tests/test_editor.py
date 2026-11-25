@@ -1,19 +1,21 @@
 import os
 from pathlib import Path
 import tempfile
+from threading import Event
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 import pymupdf
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from omnipdf.main import Editor, STYLE
+from omnipdf.i18n import _
 
 
 class EditorTests(unittest.TestCase):
@@ -57,6 +59,43 @@ class EditorTests(unittest.TestCase):
         self.window.pending = False
         self.window.close()
         self.temp.cleanup()
+
+    def test_editor_panel_slides_only_for_editable_text(self):
+        window = self.window
+        panel = window.editor_panel
+        slide = window._editor_slide
+        full_width = window.view.width()
+        self.assertTrue(panel.isHidden())
+        window.select_range(window.pdf.characters(0)[:3])
+        self.assertTrue(panel.isHidden())
+        window.cover_button.click()
+        window.select_region((45, 55, 120, 95))
+        self.assertTrue(panel.isHidden())
+        window.cover_button.click()
+
+        window.select_text(window.pdf.spans(0)[0])
+        self.assertTrue(panel.isVisible())
+        slide.setCurrentTime(slide.duration() // 2)
+        midway = panel.width()
+        self.assertGreater(midway, 0)
+        self.assertLess(midway, 320)
+        self.assertLess(window.view.width(), full_width)
+        self.assertLessEqual(window.selection_preview.pixmap().width(), 320 - 48)
+        window.cancel_button.click()
+        self.assertEqual(panel.width(), midway)
+        slide.setCurrentTime(0)
+        self.assertTrue(panel.isHidden())
+        self.assertEqual(window.view.width(), full_width)
+
+        window.region_button.click()
+        window.select_region((45, 55, 120, 95))
+        slide.setCurrentTime(slide.duration())
+        self.assertEqual(panel.width(), 320)
+        self.assertTrue(window.text.hasFocus())
+        QTest.keyClick(window.text, Qt.Key.Key_Escape)
+        slide.setCurrentTime(0)
+        self.assertTrue(panel.isHidden())
+        self.assertTrue(window.view.hasFocus())
 
     def test_click_creates_text_box_ready_for_typing(self):
         window = self.window
@@ -223,18 +262,119 @@ class EditorTests(unittest.TestCase):
     def test_ocr_region_edit_and_page_change(self):
         window = self.window
         window.open_file(path=self.root / 'scan.png')
-        window.ocr_scale = 2
-        # OCR returns rendered-image pixels, not PDF points.
-        window._ocr_completed([{'text': 'INVOICE 12345', 'bbox': (99, 122, 406, 168)}])
-        self.assertEqual(len(window.ocr_areas[0]), 1)
-        area = window.ocr_areas[0][0]
-        window.select_text(area)
+        lines = [{'text': text, 'bbox': (49, y, 210, y + 30), 'size': 12, 'color': 0}
+                 for y, text in [(59, 'INVOICE 12345'), (120, 'TOTAL 120.00 EUR'), (180, 'Another line')]]
+        window.pdf.page_versions[0].ocr = lines
+        window.select_text(lines[0])
         window.text.setPlainText('INVOICE 54321')
         self.assertTrue(window.apply_change())
         self.assertIn('INVOICE 54321', window.pdf.document[0].get_text())
-        self.assertFalse(window.ocr_areas[0])
+        self.assertEqual(window.pdf.page_versions[0].ocr, lines[1:])
+        window.select_text(lines[1])
+        window.text.setPlainText('TOTAL 42.00 EUR')
+        self.assertTrue(window.apply_change())
+        self.assertEqual(window.pdf.page_versions[0].ocr, lines[2:])
+        window.undo()
+        self.assertEqual(window.pdf.page_versions[0].ocr, lines[1:])
+        self.assertEqual({area['text'] for area in window.view.areas},
+                         {'INVOICE 54321', 'TOTAL 120.00 EUR', 'Another line'})
+        window.redo()
+        self.assertEqual(window.pdf.page_versions[0].ocr, lines[2:])
+        window.undo()
         window.undo()
         self.assertEqual(window.pdf.document[0].get_text(), '')
+        self.assertEqual(window.pdf.page_versions[0].ocr, lines)
+
+    def test_unsaved_prompt_has_primary_save_and_close_keeps_the_draft(self):
+        window = self.window
+        window.select_text(window.pdf.spans(0)[0])
+        window.text.setPlainText('Unfinished edit')
+        window.auto_apply_timer.stop()
+        visible = {}
+        save_colors = []
+        close_results = []
+
+        def close_prompt():
+            prompt = self.app.activeModalWidget()
+            try:
+                for button in prompt.buttons():
+                    if button.isVisible():
+                        visible[prompt.standardButton(button)] = button.objectName()
+                save = prompt.button(QMessageBox.StandardButton.Save).grab().toImage()
+                save_colors.append(save.pixelColor(save.width() // 2, round(4 * save.devicePixelRatio())).name())
+            finally:
+                close_results.append(prompt.close())
+
+        QTimer.singleShot(0, close_prompt)
+        self.assertFalse(window.close())
+        buttons = QMessageBox.StandardButton
+        self.assertEqual(set(visible), {buttons.Save, buttons.Discard})
+        self.assertEqual(visible[buttons.Save], 'primary')
+        self.assertEqual(len(save_colors), 1)
+        self.assertIn(save_colors[0], ('#087f83', '#07676b'))
+        self.assertEqual(close_results, [True])
+        self.assertTrue(window.isVisible())
+        self.assertTrue(window.pending)
+        self.assertEqual(window.text.toPlainText(), 'Unfinished edit')
+
+    def test_save_dialog_requires_confirmation_before_replacing_source(self):
+        window = self.window
+        window.select_text(window.pdf.spans(0)[0])
+        window.text.setPlainText('INVOICE 54321')
+        before = self.source.read_bytes()
+        with patch.object(QFileDialog, 'getSaveFileName', return_value=(str(self.source), 'PDF (*.pdf)')):
+            with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.No):
+                self.assertFalse(window.save_copy())
+            self.assertEqual(self.source.read_bytes(), before)
+            with patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.Yes):
+                self.assertTrue(window.save_copy())
+        with pymupdf.open(self.source) as saved:
+            self.assertIn('INVOICE 54321', saved[0].get_text())
+
+    def test_searchable_save_ocr_visits_unopened_scan_pages(self):
+        window = self.window
+        source = self.root / 'searchable-source.pdf'
+        target = self.root / 'searchable.pdf'
+        with pymupdf.open() as pdf:
+            pdf.new_page(width=500, height=700).insert_text((50, 70), 'Introduction')
+            page = pdf.new_page(width=500, height=700)
+            page.insert_image(page.rect, filename=self.root / 'scan.png')
+            pdf.save(source)
+        window.open_file(path=source)
+        self.auto_ocr_patch.stop()
+        sample = [{'text': 'INVOICE 12345', 'bbox': (105, 160, 450, 205)}]
+        with patch('omnipdf.main.recognize', return_value=sample) as recognize, \
+                patch.object(QFileDialog, 'getSaveFileName', return_value=(str(target), 'PDF (*.pdf)')):
+            self.assertTrue(window.save_copy(searchable=True))
+            recognize.assert_called_once()
+        self.assertEqual(window.page_index, 0)
+        with pymupdf.open(target) as saved:
+            self.assertIn('INVOICE 12345', saved[1].get_text())
+            self.assertTrue(saved[1].get_images())
+
+    def test_thumbnail_modifier_selection_and_batch_editing(self):
+        window = self.window
+        window.insert_pdf(path=self.source, append=True)
+        thumbnails = window.thumbnails
+        def click(row, modifier=Qt.KeyboardModifier.NoModifier):
+            item = thumbnails.item(row)
+            thumbnails.scrollToItem(item)
+            QTest.mouseClick(thumbnails.viewport(), Qt.MouseButton.LeftButton, modifier,
+                             thumbnails.visualItemRect(item).center())
+            self.app.processEvents()
+        click(0)
+        click(2, Qt.KeyboardModifier.ControlModifier)
+        self.assertEqual(thumbnails.selected_pages(), [0, 2])
+        window.rotate_right_action.trigger()
+        self.assertEqual([page.rotation for page in window.pdf.document], [90, 0, 90, 0])
+        self.assertEqual(thumbnails.selected_pages(), [0, 2])
+        click(0)
+        click(2, Qt.KeyboardModifier.ShiftModifier)
+        self.assertEqual(thumbnails.selected_pages(), [0, 1, 2])
+        window.delete_page_action.trigger()
+        self.assertEqual(window.pdf.page_count, 1)
+        window.undo()
+        self.assertEqual(window.pdf.page_count, 4)
 
     def test_navigation_flushes_pending_text_and_blocks_invalid_edit(self):
         window = self.window
@@ -287,6 +427,33 @@ class EditorTests(unittest.TestCase):
         self.assertIn('INVOICE 12345', window.pdf.document[0].get_text())
         QTest.qWait(750)
         self.assertIn('NVOICE 12345', window.pdf.document[0].get_text())
+
+    def test_text_replacement_preserves_background_unless_white_is_selected(self):
+        path = self.root / 'yellow.pdf'
+        with pymupdf.open() as doc:
+            page = doc.new_page(width=250, height=120)
+            page.draw_rect(page.rect, color=None, fill=(1, 0.8, 0))
+            page.insert_text((20, 60), '17 500,00', fontname='hebo', fontsize=22)
+            doc.save(path)
+        window = self.window
+        window.open_file(path=path)
+        before = window.pdf.render(0, scale=1).samples
+        span = window.pdf.spans(0)[0]
+        rect = pymupdf.Rect(span['bbox'])
+        x, y = int(rect.x1 - 4), int(rect.y0 + rect.height * 0.4)
+        self.assertFalse(window.white_background.isChecked())
+
+        window.select_text(span)
+        window.text.setPlainText('7')
+        self.assertTrue(window.apply_change())
+        self.assertEqual(window.pdf.document[0].get_text().strip(), '7')
+        self.assertEqual(window.pdf.render(0, scale=1).pixel(x, y), (255, 204, 0))
+
+        window.white_background.setChecked(True)
+        self.assertTrue(window.apply_change())
+        self.assertEqual(window.pdf.render(0, scale=1).pixel(x, y), (255, 255, 255))
+        window.undo()
+        self.assertEqual(window.pdf.render(0, scale=1).samples, before)
 
     def test_auto_apply_coalesces_and_keeps_last_valid_result(self):
         window = self.window
@@ -432,11 +599,11 @@ class EditorTests(unittest.TestCase):
         window.redo()
         self.assertEqual(window.pdf.page_count, 3)
         window.change_page(2)
-        window.ocr_areas[2] = [{'text': 'Stale'}]
+        window.pdf.page_versions[2].ocr = [{'text': 'Stale'}]
         window.delete_page_action.trigger()
         self.assertEqual(window.page_index, 1)
         self.assertEqual(window.thumbnails.count(), 3)
-        self.assertEqual(window.ocr_areas, {})
+        self.assertTrue(all(version.ocr is None for version in window.pdf.page_versions))
         window.delete_page_action.trigger()
         self.assertEqual(window.page_label.text(), '1 / 1')
         self.assertTrue(window.delete_page_action.isEnabled())
@@ -535,11 +702,199 @@ class EditorTests(unittest.TestCase):
                     break
                 QTest.qWait(20)
             self.assertEqual(recognize.call_count, 1)
-            self.assertEqual(window.ocr_areas[0][0]['text'], 'Scan text')
+            self.assertEqual(window.pdf.page_versions[0].ocr[0]['text'], 'Scan text')
             self.assertTrue(window.open_button.isEnabled())
             window.render_page()
             self.app.processEvents()
             self.assertEqual(recognize.call_count, 1)
+
+    def test_thumbnail_drop_and_undo_keep_page_content_and_versions(self):
+        window = self.window
+        thumbnails = window.thumbnails
+        versions = window.pdf.page_versions.copy()
+        icons = dict(window._thumbnail_icons)
+        thumbnails.setCurrentRow(0)
+        drop = Mock()
+        drop.source.return_value = thumbnails
+        drop.position.return_value = QPointF(thumbnails.visualItemRect(thumbnails.item(1)).bottomLeft()) + QPointF(15, -5)
+        with patch('omnipdf.main.QDrag') as drag:
+            drag.return_value.exec.side_effect = lambda _: thumbnails.dropEvent(drop)
+            thumbnails.startDrag(Qt.DropAction.MoveAction)
+            drag.return_value.setMimeData.assert_called_once()
+        drop.accept.assert_called_once()
+        self.assertEqual(window.pdf.page_versions, versions[::-1])
+        self.assertIn('INVOICE', window.pdf.document[1].get_text())
+        self.assertEqual(window._thumbnail_icons, icons)
+        self.assertIs(thumbnails.item(2), window.add_pdf_item)
+        self.assertEqual(window.page_index, 1)
+        overlay = thumbnails._reorder_overlay
+        animation = thumbnails._reorder_animation
+        self.assertTrue(overlay.isVisible())
+        first_frame = overlay.pixmap().toImage()
+        animation.setCurrentTime(animation.duration() // 3)
+        self.assertNotEqual(overlay.pixmap().toImage(), first_frame)
+        animation.setCurrentTime(animation.duration())
+        self.assertFalse(overlay.isVisible())
+        window.undo()
+        self.assertEqual(window.pdf.page_versions, versions)
+        self.assertEqual(window.page_index, 0)
+        self.assertTrue(overlay.isVisible())
+        window.redo()
+        self.assertEqual(window.pdf.page_versions, versions[::-1])
+        self.assertTrue(overlay.isVisible())
+        output = self.root / 'reordered.pdf'
+        window.pdf.save_copy(output)
+        with pymupdf.open(output) as saved:
+            self.assertIn('INVOICE', saved[1].get_text())
+
+    def test_thumbnail_gap_and_its_adjacent_halves_share_one_drop_boundary(self):
+        window = self.window
+        window.pdf.insert_pdf(self.source, 1)
+        window.render_page()
+        thumbnails = window.thumbnails
+        self.app.processEvents()
+        self.assertFalse(thumbnails.showDropIndicator())
+        above = thumbnails.visualItemRect(thumbnails.item(1))
+        below = thumbnails.visualItemRect(thumbnails.item(2))
+        gap_y = (above.bottom() + below.top()) // 2
+        for y in (above.bottom() - 4, gap_y, below.top() + 4):
+            with self.subTest(y=y):
+                self.assertEqual(thumbnails._drop_boundary(y), 2)
+        x = above.center().x()
+        thumbnails._set_drop_y(gap_y)
+        image = thumbnails.viewport().grab().toImage().scaled(thumbnails.viewport().size())
+        marker_y = [y for y in range(above.bottom() + 1, below.top())
+                    if image.pixelColor(x, y).name() == '#087f83']
+        self.assertIn(len(marker_y), (2, 3))
+        self.assertEqual(marker_y[-1] - marker_y[0], len(marker_y) - 1)
+
+        thumbnails.setCurrentRow(0)
+        drop = Mock()
+        drop.source.return_value = thumbnails
+        drop.position.return_value = QPointF(x, gap_y)
+        before = window.pdf.page_versions.copy()
+        with patch('omnipdf.main.QDrag') as drag:
+            drag.return_value.exec.side_effect = lambda _: thumbnails.dropEvent(drop)
+            thumbnails.startDrag(Qt.DropAction.MoveAction)
+        self.assertEqual(window.pdf.page_versions, [before[1], before[0], *before[2:]])
+        self.assertIsNone(thumbnails._drop_y)
+
+    def test_only_edited_page_is_rendered_again(self):
+        window = self.window
+        path = self.root / 'many-pages.pdf'
+        with pymupdf.open() as pdf:
+            for index in range(20):
+                pdf.new_page(width=400, height=400).insert_text((50, 70), f'Page {index + 1}')
+            pdf.save(path)
+        window.open_file(path=path)
+        self.app.processEvents()
+        unchanged = window.thumbnails.item(1).icon().cacheKey()
+        window.select_text(window.pdf.spans(0)[0])
+        window.text.setPlainText('Page A')
+        with patch.object(window.pdf, 'render', wraps=window.pdf.render) as render:
+            self.assertTrue(window.apply_change())
+        self.assertGreater(render.call_count, 0)
+        self.assertEqual({call.args[0] for call in render.call_args_list}, {0})
+        self.assertEqual(window.thumbnails.item(1).icon().cacheKey(), unchanged)
+
+    def test_find_popup_follows_top_right_without_resizing_document(self):
+        window = self.window
+        document_bounds = window.splitter.geometry()
+        QTest.keyClick(window, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
+        self.app.processEvents()
+        popup = window.find_bar
+        self.assertTrue(popup.isVisible())
+        self.assertTrue(window.find_input.hasFocus())
+        self.assertEqual(window.splitter.geometry(), document_bounds)
+
+        for width in (1100, 950):
+            window.resize(width, window.height())
+            self.app.processEvents()
+            parent = window.centralWidget()
+            self.assertTrue(parent.rect().contains(popup.geometry()))
+            self.assertLess(popup.width(), parent.width() // 2)
+            self.assertLess(parent.rect().right() - popup.geometry().right(), 24)
+            self.assertLess(popup.y() - window.splitter.y(), 24)
+
+        QTest.keyClick(window.find_input, Qt.Key.Key_Escape)
+        self.assertTrue(popup.isHidden())
+
+    def test_find_searches_unvisited_scans_without_blocking_navigation(self):
+        window = self.window
+        path = self.root / 'search.pdf'
+        with pymupdf.open() as pdf:
+            pdf.new_page(width=500, height=700).insert_text((50, 70), 'Invoice document')
+            page = pdf.new_page(width=500, height=700)
+            page.insert_image(page.rect, filename=self.root / 'scan.png')
+            pdf.new_page(width=500, height=700).insert_text((50, 70), 'Third page')
+            pdf.save(path)
+        self.auto_ocr_patch.stop()
+        release = Event()
+
+        def recognize(path, *, cancelled):
+            release.wait(10)
+            return [{'text': 'INVOICE scan', 'bbox': (90, 90, 345, 135)}]
+
+        with patch('omnipdf.main.recognize', side_effect=recognize):
+            try:
+                window.open_file(path=path)
+                QTest.keyClick(window, Qt.Key.Key_F, Qt.KeyboardModifier.ControlModifier)
+                self.assertTrue(window.find_bar.isVisible())
+                window.find_input.setText('invoice')
+                deadline = time.monotonic() + 5
+                while window.ocr_worker is None and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                self.assertIsNotNone(window.ocr_worker)
+                self.assertIs(window.ocr_worker.version, window.pdf.page_versions[1])
+                self.assertTrue(window.next_button.isEnabled())
+                window.change_page(2)
+                self.assertEqual(window.page_index, 2)
+                release.set()
+                while window.ocr_worker and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                self.assertIsNone(window.ocr_worker)
+                self.assertEqual([index for index, _ in window._find_hits()], [0, 1])
+                self.assertEqual(window.page_index, 2)
+                self.assertEqual(window.pdf.page_versions[1].ocr[0]['text'], 'INVOICE scan')
+                window.find_next.click()
+                self.assertEqual(window.page_index, 1)
+                self.assertTrue(window.view.find_items)
+                QTest.keyClick(window.find_input, Qt.Key.Key_Escape)
+                self.assertTrue(window.find_bar.isHidden())
+                self.assertFalse(window.view.find_items)
+            finally:
+                release.set()
+
+    def test_find_grouping_and_failed_offscreen_scan(self):
+        window = self.window
+        path = self.root / 'wrapped.pdf'
+        with pymupdf.open() as pdf:
+            page = pdf.new_page(width=500, height=700)
+            page.insert_text((30, 70), 'Find this\nphrase here', fontsize=14)
+            page = pdf.new_page(width=500, height=700)
+            page.insert_image(page.rect, filename=self.root / 'scan.png')
+            pdf.save(path)
+        self.auto_ocr_patch.stop()
+        with patch('omnipdf.main.recognize', side_effect=RuntimeError('OCR language pack unavailable')) as recognize:
+            window.open_file(path=path)
+            window._open_find()
+            window.find_input.setText('this phrase')
+            deadline = time.monotonic() + 5
+            while (not recognize.called or window.ocr_worker) and time.monotonic() < deadline:
+                QTest.qWait(20)
+            recognize.assert_called_once()
+            self.assertEqual(len(window._find_hits()), 1)
+            self.assertEqual(len(window._find_hit[1]), 2)
+            self.assertEqual(len(window.view.find_items), 2)
+            incomplete = _('Niektoré strany sa nepodarilo prehľadať')
+            self.assertEqual(window.find_status.text(), f'1 / 1 · {incomplete}')
+            window.find_next.click()
+            self.assertEqual(window.find_status.text(), f'1 / 1 · {incomplete}')
+            window.find_input.setText('no native results')
+            QTest.qWait(180)
+            self.assertEqual(window.find_status.text(), incomplete)
+            self.assertFalse(window.find_next.isEnabled())
+            recognize.assert_called_once()
 
     def test_zoom_refresh_preserves_selection_and_transform(self):
         window = self.window
@@ -797,7 +1152,7 @@ class EditorTests(unittest.TestCase):
         source = pymupdf.Rect(window.pdf.spans(0)[0]['bbox']) + (-2, -2, 2, 2)
         destination = source + (0, 60, 0, 60)
         ocr = {'text': 'TOTAL', 'bbox': (50, 125, 165, 145)}
-        window.ocr_areas[0] = [ocr]
+        window.pdf.page_versions[0].ocr = [ocr]
         window.select_region(tuple(source))
         original = window.pdf.document[0].get_pixmap().samples
         start = view.mapFromScene(view.display_rect(source).center())
@@ -813,7 +1168,7 @@ class EditorTests(unittest.TestCase):
         window.transform_area(tuple(source))
         self.assertIn('TOTAL 120.00 EUR', window.pdf.document[0].get_text())
         self.assertEqual(window.pdf.document[0].get_pixmap().samples, original)
-        self.assertEqual(window.ocr_areas[0], [ocr])
+        self.assertEqual(window.pdf.page_versions[0].ocr, [ocr])
         window.undo()
         self.assertIn('TOTAL 120.00 EUR', window.pdf.document[0].get_text())
 
@@ -874,18 +1229,27 @@ class EditorTests(unittest.TestCase):
     def test_real_ocr_then_replace(self):
         window = self.window
         self.auto_ocr_patch.stop()
-        window.open_file(path=self.root / 'scan.png')
+        scan = self.root / 'yellow-scan.png'
+        with pymupdf.open(self.source) as source:
+            page = source[0]
+            page.draw_rect(page.rect, color=None, fill=(1, 0.8, 0), overlay=False)
+            page.get_pixmap(matrix=pymupdf.Matrix(2, 2)).save(scan)
+        window.open_file(path=scan)
         self.app.processEvents()
         deadline = time.monotonic() + 45
         while window.ocr_worker and time.monotonic() < deadline:
             self.app.processEvents()
             QTest.qWait(50)
         self.assertIsNone(window.ocr_worker)
-        area = next(s for s in window.ocr_areas[0] if '12345' in s['text'])
+        area = next(s for s in window.pdf.page_versions[0].ocr if '12345' in s['text'])
         window.select_text(area)
         window.text.setPlainText('INVOICE 54321')
         self.assertTrue(window.apply_change())
         self.assertIn('INVOICE 54321', window.pdf.document[0].get_text())
+        rect = pymupdf.Rect(area['bbox'])
+        edited_pixels = window.pdf.render(0, scale=2, clip=rect).samples
+        self.assertIn(b'\xff\xcc\x00', edited_pixels)
+        self.assertNotIn(b'\xff\xff\xff', edited_pixels)
 
 
 if __name__ == '__main__':
