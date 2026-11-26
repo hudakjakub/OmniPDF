@@ -20,7 +20,6 @@ class LightThemeTests(unittest.TestCase):
         self.palette = self.app.palette()
         self.stylesheet = self.app.styleSheet()
         self.scheme = self.app.styleHints().colorScheme()
-        self.dialog_attribute = self.app.testAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs)
         self.app.setStyleSheet('')
         self.app.styleHints().setColorScheme(Qt.ColorScheme.Dark)
         dark = QPalette()
@@ -36,7 +35,6 @@ class LightThemeTests(unittest.TestCase):
         self.app.styleHints().setColorScheme(self.scheme)
         self.app.setPalette(self.palette)
         self.app.setStyleSheet(self.stylesheet)
-        self.app.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs, self.dialog_attribute)
 
     def assert_light(self, widget):
         for role in (QPalette.ColorRole.Window, QPalette.ColorRole.Base, QPalette.ColorRole.Button,
@@ -47,7 +45,7 @@ class LightThemeTests(unittest.TestCase):
 
     def test_light_palette_reaches_popups_inputs_and_dialogs_after_dark_startup(self):
         self.assertNotEqual(self.app.styleHints().colorScheme(), Qt.ColorScheme.Dark)
-        self.assertTrue(self.app.testAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs))
+        self.assertFalse(self.app.testAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs))
         with tempfile.TemporaryDirectory() as directory:
             file_dialog = QFileDialog(self.window, 'Otvoriť PDF', directory, 'PDF (*.pdf)')
             message = QMessageBox(QMessageBox.Icon.Warning, 'Upozornenie', 'Skúšobná správa',

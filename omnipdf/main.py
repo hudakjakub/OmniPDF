@@ -2818,7 +2818,6 @@ QMessageBox { background: #ffffff; }
 
 def apply_light_theme(application):
     application.styleHints().setColorScheme(Qt.ColorScheme.Light)
-    application.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs, True)
     application.setStyle('Fusion')
     palette = application.style().standardPalette()
     for role, color in (

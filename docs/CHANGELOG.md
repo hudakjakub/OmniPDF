@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.19
+
+- Use the native Windows file dialogs for opening and saving documents.
+
 ## 0.1.18
 
 - Document the proposed code signing policy and update privacy information.
