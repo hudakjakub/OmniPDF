@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
-from omnipdf.pdf_document import PdfDocument, SignedPdfError
+from omnipdf.pdf_document import PdfDocument, SignedPdfError, character_lines
 from omnipdf.windows_ocr import recognize
 from omnipdf.app_info import APP_NAME, VERSION, PROJECT_URL
 from omnipdf.i18n import _, configure_language
@@ -35,6 +35,7 @@ def project_root():
 
 
 APP_ICON = project_root() / 'omnipdf' / 'assets' / 'omni.svg'
+APP_ICON_LIGHT = APP_ICON.with_name('omni-light.svg')
 
 
 ERRORS = {
@@ -84,11 +85,11 @@ class PageView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         self.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-        self.setBackgroundBrush(QColor('#e4e9ed'))
+        self.setBackgroundBrush(QColor('#e7edf6'))
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAccessibleName(_('Strana PDF. Ťahaním označte text, klávesom Delete ho vymažte.'))
+        self.setAccessibleName(_('Strana PDF. Kliknutím alebo ťahaním vyberte text na úpravu.'))
         self.areas = []
         self.characters = []
         self.page_rect = QRectF()
@@ -250,17 +251,13 @@ class PageView(QGraphicsView):
                 display = (transform.mapRect(QRectF(rect.x0, rect.y0, rect.width, rect.height))
                            if transform is not None else self.display_rect(bbox))
                 path.addRect(display)
-            pen = QPen(QColor('#087f83'), 1.4)
+            pen = QPen(QColor('#365f9e'), 1.4)
             pen.setCosmetic(True)
-            self.selection_item = self.scene().addPath(path, pen, QColor(8, 127, 131, 40))
+            self.selection_item = self.scene().addPath(path, pen, QColor(54, 95, 158, 40))
             self.selection_item.setZValue(1)
 
     def highlight_characters(self, characters, transform=None):
-        boxes = {}
-        for char in characters:
-            rect = pymupdf.Rect(char['bbox'])
-            boxes[char['line']] = boxes[char['line']] | rect if char['line'] in boxes else rect
-        self.highlight_boxes(list(boxes.values()), transform)
+        self.highlight_boxes([box for box, _ in character_lines(characters)], transform)
 
     def fit_width(self):
         if self.page_rect.width():
@@ -307,8 +304,11 @@ class PageView(QGraphicsView):
         if not candidates:
             return None
         index = min(candidates)[2]
-        rect = pymupdf.Rect(self.characters[index]['bbox'])
-        return index + int(point.x > (rect.x0 + rect.x1) / 2)
+        char = self.characters[index]
+        rect = pymupdf.Rect(char['bbox'])
+        dx, dy = char['direction']
+        return index + int((point.x - (rect.x0 + rect.x1) / 2) * dx
+                           + (point.y - (rect.y0 + rect.y1) / 2) * dy > 0)
 
     def _drag_characters(self, point):
         point.setX(min(max(point.x(), self.page_rect.left()), self.page_rect.right()))
@@ -589,7 +589,7 @@ class ThumbnailDelegate(QStyledItemDelegate):
         target = QRectF(option.rect.x() + margin, option.rect.y() + margin, size.width(), size.height())
         painter.save()
         painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
-        painter.setPen(QColor('#243642'))
+        painter.setPen(QColor('#263449'))
         painter.drawText(option.rect.adjusted(0, option.rect.height() - 24, 0, -2), Qt.AlignmentFlag.AlignCenter, text)
         painter.restore()
 
@@ -677,7 +677,7 @@ class ThumbnailList(QListWidget):
             y = max(2, min(rect.top() - gap, self.viewport().height() - 3))
             painter = QPainter(self.viewport())
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setPen(QPen(QColor('#087f83'), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            painter.setPen(QPen(QColor('#365f9e'), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             painter.drawLine(rect.left() + 8, y, rect.right() - 8, y)
 
     def stop_reorder(self):
@@ -856,7 +856,7 @@ class Editor(QMainWindow):
         self.auto_apply_timer.setInterval(650)
         self.auto_apply_timer.timeout.connect(lambda: self.apply_change(automatic=True))
         self.setWindowTitle(APP_NAME)
-        self.setWindowIcon(QIcon(str(APP_ICON)))
+        self.setWindowIcon(QIcon(str(APP_ICON_LIGHT)))
         self.resize(1340, 900)
         self.setMinimumSize(950, 640)
         self._build_ui()
@@ -950,7 +950,7 @@ class Editor(QMainWindow):
         row.setSpacing(3)
         brand = ToolbarButton()
         brand.setObjectName('brand')
-        brand.setIcon(self.windowIcon())
+        brand.setIcon(QIcon(str(APP_ICON_LIGHT)))
         brand.setIconSize(QSize(22, 22))
         brand.setFixedSize(32, 32)
         brand.setAutoRaise(True)
@@ -1037,7 +1037,7 @@ class Editor(QMainWindow):
         shadow = QGraphicsDropShadowEffect(self.find_bar)
         shadow.setBlurRadius(20)
         shadow.setOffset(0, 4)
-        shadow.setColor(QColor(30, 45, 56, 42))
+        shadow.setColor(QColor(27, 45, 70, 42))
         self.find_bar.setGraphicsEffect(shadow)
         find_layout = QVBoxLayout(self.find_bar)
         find_layout.setContentsMargins(8, 7, 8, 7)
@@ -1098,18 +1098,13 @@ class Editor(QMainWindow):
         self.selection_preview.setAccessibleName(_('Zväčšený náhľad vybraného textu'))
         self.selection_preview.hide()
         form.addWidget(self.selection_preview)
-        self.hint = QLabel(_('Otvorte PDF a kliknite na text, ktorý chcete zmeniť.'))
-        self.hint.setWordWrap(True)
-        self.hint.setObjectName('muted')
-        form.addWidget(self.hint)
-        label = QLabel(_('Nový text'))
-        form.addWidget(label)
+        self.text_label = QLabel()
+        form.addWidget(self.text_label)
         self.text = QTextEdit()
         self.text.setAcceptRichText(False)
-        self.text.setPlaceholderText(_('Vyberte text na strane…'))
         self.text.setMinimumHeight(120)
         self.text.setMaximumHeight(220)
-        label.setBuddy(self.text)
+        self.text_label.setBuddy(self.text)
         self.text.textChanged.connect(self._edited)
         form.addWidget(self.text)
         self.edit_error = QLabel()
@@ -1184,7 +1179,7 @@ class Editor(QMainWindow):
         drop_zone.setMaximumWidth(680)
         self.drop_effect = QGraphicsDropShadowEffect(drop_zone)
         self.drop_effect.setOffset(0, 0)
-        self.drop_effect.setColor(QColor('#65b9b5'))
+        self.drop_effect.setColor(QColor('#8ab4f8'))
         self.drop_effect.setEnabled(False)
         drop_zone.setGraphicsEffect(self.drop_effect)
         self.drop_animation = QPropertyAnimation(self.drop_effect, b'blurRadius', self)
@@ -1249,7 +1244,7 @@ class Editor(QMainWindow):
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(QColor('#243642'), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setPen(QPen(QColor('#263449'), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         if symbol in ('undo', 'redo'):
             if symbol == 'redo':
                 painter.translate(24, 0)
@@ -1318,7 +1313,7 @@ class Editor(QMainWindow):
             painter.drawLine(11, 16, 17, 16)
         else:
             if symbol == 'cover':
-                painter.setPen(QPen(QColor('#344b58'), 2, Qt.PenStyle.DashLine))
+                painter.setPen(QPen(QColor('#3a506c'), 2, Qt.PenStyle.DashLine))
                 painter.drawRect(QRectF(3, 3, 18, 18))
             else:
                 painter.drawRect(QRectF(3, 3, 18, 18))
@@ -1329,7 +1324,7 @@ class Editor(QMainWindow):
         disabled = pixmap.copy()
         painter = QPainter(disabled)
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-        painter.fillRect(disabled.rect(), QColor('#b8c2ca'))
+        painter.fillRect(disabled.rect(), QColor('#b4c2d5'))
         painter.end()
         icon = QIcon(pixmap)
         icon.addPixmap(disabled, QIcon.Mode.Disabled)
@@ -1353,7 +1348,7 @@ class Editor(QMainWindow):
         return self._searchable_progress is not None or (self._update_pending and self.update_worker is not None)
 
     def _has_editable_selection(self):
-        return self.selection is not None and 'characters' not in self.selection and self.selection.get('kind') != 'area'
+        return self.selection is not None and self.selection.get('kind') != 'area'
 
     def _set_editor_open(self, opened):
         if opened == self._editor_open:
@@ -1439,7 +1434,7 @@ class Editor(QMainWindow):
         self.setWindowTitle(f'{"* " if dirty else ""}{title}')
 
     def _edited(self, *args):
-        if self.selection is not None and 'characters' not in self.selection:
+        if self._has_editable_selection():
             self.pending = True
             self.edit_error.hide()
             self.auto_apply_timer.start()
@@ -1682,7 +1677,7 @@ class Editor(QMainWindow):
             if not areas and self.pdf.page_versions[self.page_index].ocr is None:
                 self.statusBar().showMessage(_('Text tejto strany sa rozpozná automaticky. Môžete tiež pridať textové pole alebo zakryť oblasť.'))
             else:
-                self.statusBar().showMessage(_('Strana {page} z {count}. Ťahaním označte text a stlačte Delete. Kliknutím upravíte celý úsek.').format(page=self.page_index + 1, count=self.pdf.page_count))
+                self.statusBar().showMessage(_('Strana {page} z {count}. Kliknutím alebo ťahaním vyberte text na úpravu. Kláves Delete vymaže výber.').format(page=self.page_index + 1, count=self.pdf.page_count))
             if self._needs_ocr(self.page_index, native):
                 self.ocr_timer.start(0)
         except Exception as exc:
@@ -2148,8 +2143,11 @@ class Editor(QMainWindow):
         pix = self.pdf.render(index, scale, clip=clip)
         image = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888).copy()
         painter = QPainter(image)
-        painter.setPen(QPen(QColor('#087f83'), max(1, scale)))
-        painter.drawRect(QRectF(box.x0 * scale - pix.x, box.y0 * scale - pix.y, box.width * scale, box.height * scale))
+        painter.setPen(QPen(QColor('#365f9e'), max(1, scale)))
+        for bbox in self.selection.get('boxes', (self.selection['bbox'],)):
+            outline = pymupdf.Rect(bbox) * page.rotation_matrix
+            painter.drawRect(QRectF(outline.x0 * scale - pix.x, outline.y0 * scale - pix.y,
+                                    outline.width * scale, outline.height * scale))
         painter.end()
         form = self.editor_panel.widget()
         margins = form.layout().contentsMargins()
@@ -2165,6 +2163,7 @@ class Editor(QMainWindow):
             return
         self.selection = {**span, 'page_index': self.page_index}
         self.edit_applied = False
+        self.text_label.setText(_('Text na vloženie') if span.get('insert_only') else _('Náhradný text'))
         self.text.blockSignals(True)
         self.font_size.blockSignals(True)
         self.text.setPlainText(span['text'])
@@ -2179,39 +2178,29 @@ class Editor(QMainWindow):
         self.pending = False
         self.edit_error.hide()
         self.restore_highlight()
-        self.hint.setText(_('Text sa po dopísaní automaticky zmení v náhľade. Delete na strane vymaže výber. PDF uložíte tlačidlom Uložiť PDF.'))
         self._update_actions()
         self.update_selection_preview()
         self.view.setFocus()
 
     def select_range(self, characters):
-        if not self._discard_pending():
-            self.restore_highlight()
-            return
         if not characters:
-            self.clear_selection()
+            if self._discard_pending():
+                self.clear_selection()
+            else:
+                self.restore_highlight()
             return
-        box = pymupdf.Rect(characters[0]['bbox'])
-        content = []
-        previous_line = characters[0]['line']
-        for char in characters:
-            box |= pymupdf.Rect(char['bbox'])
-            if char['line'] != previous_line:
-                content.append('\n')
-            content.append(char['text'])
-            previous_line = char['line']
-        self.selection = {'characters': characters, 'bbox': tuple(box), 'page_index': self.page_index}
-        self.edit_applied = False
-        self.pending = False
-        self.edit_error.hide()
-        self.text.blockSignals(True)
-        self.text.setPlainText(''.join(content))
-        self.text.blockSignals(False)
-        self.restore_highlight()
-        self.update_selection_preview()
-        self.statusBar().showMessage(_('Označený text vymažete klávesom Delete. Tlačidlom Späť vymazanie vrátite.'))
-        self._update_actions()
-        self.view.setFocus()
+        lines = list(character_lines(characters))
+        box = pymupdf.Rect()
+        for rect, _ in lines:
+            box.include_rect(rect)
+        self.select_text({
+            'characters': characters,
+            'bbox': tuple(box),
+            'boxes': tuple(tuple(rect) for rect, _ in lines),
+            'text': '\n'.join(''.join(char['text'] for char in line) for _, line in lines),
+            'size': characters[0]['size'],
+            'color': characters[0]['color'],
+        })
 
     def select_region(self, bbox):
         if self.cover_button.isChecked():
@@ -2234,8 +2223,6 @@ class Editor(QMainWindow):
             return
         self.select_text({'text': '', 'bbox': bbox, 'size': min(11, max(4, pymupdf.Rect(bbox).height * 0.65)), 'color': 0, 'insert_only': True})
         if self.selection and self.selection['bbox'] == bbox:
-            self.hint.setText(_('Zadajte text do nového poľa. Náhľad sa aktualizuje automaticky.'))
-            self._update_actions()
             self.text.setFocus()
 
     def transform_area(self, bbox):
@@ -2255,9 +2242,24 @@ class Editor(QMainWindow):
             return
         self.selection['baseline'] = baseline
         self.selection['bbox'] = bbox
-        affected = () if pymupdf.Rect(original) == pymupdf.Rect(bbox) else (original, bbox)
-        self._page_edited(index, self.selection['source_version'].ocr, *affected)
-        self.statusBar().showMessage(_('Oblasť bola upravená. Zmenu môžete vrátiť tlačidlom Späť.'))
+        ocr = self._move_area_ocr(self.selection['source_version'].ocr, pymupdf.Rect(original), pymupdf.Rect(bbox))
+        self._page_edited(index, ocr)
+        self.statusBar().showMessage(_('Oblasť bola upravená. Klávesom Esc sa vrátite k úprave textu.'))
+
+    @staticmethod
+    def _move_area_ocr(lines, source, target):
+        if lines is None or source == target:
+            return lines
+        transform = source.torect(target)
+        result = []
+        for line in lines:
+            box = pymupdf.Rect(line['bbox'])
+            if source.contains(box):
+                scale = transform.a if line.get('rotation', 0) in (90, 270) else transform.d
+                result.append({**line, 'bbox': tuple(box * transform), 'size': line.get('size', 11) * scale})
+            elif not (source.intersects(box) or target.intersects(box)):
+                result.append(line)
+        return result
 
     def cancel_selection(self, checked=False):
         if self.pending:
@@ -2286,17 +2288,20 @@ class Editor(QMainWindow):
         self.edit_error.hide()
         self.text.clear()
         self.view.highlight(None)
-        self.hint.setText(_('Kliknite na text na strane alebo pridajte textové pole ikonou T. Skeny sa rozpoznajú automaticky.'))
         self._update_actions()
 
     def apply_change(self, automatic=False):
-        if not self.pdf or self.selection is None or 'characters' in self.selection or self._busy():
+        if not self.pdf or not self._has_editable_selection() or self._busy():
             return False
         self.auto_apply_timer.stop()
         index = self.selection['page_index']
         previous_ocr = self.pdf.page_versions[index].ocr
         try:
-            self.pdf.replace_text(index, self.selection['bbox'], self.text.toPlainText(), self.font_size.currentData(), self.selection.get('color', 0), self.white_background.isChecked(), update_previous=self.edit_applied, insert_only=self.selection.get('insert_only', False))
+            self.pdf.replace_text(index, self.selection['bbox'], self.text.toPlainText(),
+                                  self.font_size.currentData(), self.selection.get('color', 0),
+                                  self.white_background.isChecked(), update_previous=self.edit_applied,
+                                  insert_only=self.selection.get('insert_only', False),
+                                  characters=self.selection.get('characters'))
         except Exception as exc:
             self.edit_error.setText(_(ERRORS.get(str(exc), str(exc))))
             self.edit_error.show()
@@ -2306,7 +2311,7 @@ class Editor(QMainWindow):
         self.pending = False
         self.edit_applied = True
         self.edit_error.hide()
-        self._page_edited(index, previous_ocr, self.selection['bbox'])
+        self._page_edited(index, previous_ocr, *self.selection.get('boxes', (self.selection['bbox'],)))
         self.statusBar().showMessage(_('Náhľad sa automaticky aktualizoval. PDF uložíte tlačidlom Uložiť PDF.'))
         return True
 
@@ -2323,19 +2328,21 @@ class Editor(QMainWindow):
                     previous_ocr = self.selection['source_version'].ocr
                 else:
                     self.pdf.cover_region(index, self.selection['bbox'])
-            elif 'characters' in self.selection:
+            elif 'characters' in self.selection and not self.edit_applied:
                 self.pdf.delete_characters(index, self.selection['characters'])
             elif self.selection.get('insert_only') and not self.edit_applied:
                 self.clear_selection()
                 return
             else:
-                self.pdf.replace_text(index, self.selection['bbox'], '', update_previous=self.edit_applied, insert_only=self.selection.get('insert_only', False))
+                self.pdf.replace_text(index, self.selection['bbox'], '', update_previous=self.edit_applied,
+                                      insert_only=self.selection.get('insert_only', False),
+                                      characters=self.selection.get('characters'))
         except Exception as exc:
             self._error(exc)
             return
-        box = self.selection.get('source_bbox', self.selection['bbox'])
+        boxes = self.selection.get('boxes', (self.selection.get('source_bbox', self.selection['bbox']),))
         self.clear_selection()
-        self._page_edited(index, previous_ocr, box)
+        self._page_edited(index, previous_ocr, *boxes)
         self.statusBar().showMessage(_('Výber bol vymazaný. Vymazanie vrátite tlačidlom Späť alebo Ctrl+Z.'))
 
     def _page_edited(self, index, previous_ocr, *boxes):
@@ -2547,7 +2554,6 @@ class Editor(QMainWindow):
             self._ocr_page_updated(worker)
             if not self.pdf or not self.pdf.page_count or self.pdf.page_versions[self.page_index] is not worker.version:
                 return
-        self.hint.setText(_('Text sa nepodarilo automaticky rozpoznať. Môžete pridať textové pole alebo zakryť oblasť.'))
         self.statusBar().showMessage(_('Automatické rozpoznanie textu zlyhalo: {message}').format(message=message))
 
     def _ocr_finished(self):
@@ -2738,74 +2744,75 @@ class Editor(QMainWindow):
 
 
 STYLE = '''
-QWidget { font-family: "Segoe UI"; font-size: 13px; color: #243642; }
+QWidget { font-family: "Segoe UI"; font-size: 13px; color: #263449; }
 QMainWindow, QDialog, #panel { background: #ffffff; }
-QToolTip { background: #ffffff; color: #243642; border: 1px solid #cad5dc; padding: 5px 8px; }
-#tools { background: #f2f4f6; border-bottom: 1px solid #d4dce2; }
-#findBar { background: #ffffff; border: 1px solid #dce3e8; border-radius: 9px; }
+QToolTip { background: #ffffff; color: #263449; border: 1px solid #c8d4e5; padding: 5px 8px; }
+#tools { background: #f0f4fa; border-bottom: 1px solid #d5e0ef; }
+#findBar { background: #ffffff; border: 1px solid #dbe4f1; border-radius: 9px; }
 #findInput { padding: 4px 8px; }
-#findStatus { color: #5e6f79; font-size: 12px; padding-left: 6px; }
-#toolbarSeparator { background: #d4dce2; }
-#muted { color: #5e6f79; }
-#filename { color: #64737e; }
+#findStatus { color: #52647b; font-size: 12px; padding-left: 6px; }
+#toolbarSeparator { background: #d5e0ef; }
+#muted { color: #52647b; }
+#filename { color: #5f6f85; }
 #paneltitle { font-size: 21px; font-weight: 600; }
 #editorPanel { background: #ffffff; }
-#thumbnails { background: #f5f8fa; border: none; border-right: 1px solid #dce3e8; }
-#thumbnails::item { color: #243642; border: 1px solid transparent; border-radius: 4px; }
-#thumbnails::item:selected { background: #dcefee; color: #07686c; border-color: #087f83; }
-#selectionPreview { background: #ffffff; border: 1px solid #dce3e8; border-radius: 4px; }
-QPushButton#appendPdf { color: #8b9aa3; background: #ffffff; border: 2px dashed #b8c2ca; border-radius: 3px; padding: 0; font-size: 64px; font-weight: 400; }
-QPushButton#appendPdf:hover, QPushButton#appendPdf:focus, QPushButton#appendPdf[dragActive="true"] { color: #087f83; border-color: #087f83; background: #eef8f7; }
-QPushButton#appendPdf:disabled { color: #b8c2ca; background: #f5f8fa; border-color: #dce3e8; }
-QMenu { background: #ffffff; color: #243642; border: 1px solid #cad5dc; padding: 4px; }
-QMenu::item { background: transparent; color: #243642; padding: 7px 20px; }
-QMenu::item:selected { background: #dcefee; color: #07686c; }
-QMenu::item:disabled { color: #8b9aa3; }
-QMenu::separator { height: 1px; background: #dce3e8; margin: 4px 8px; }
-QComboBox QAbstractItemView { background: #ffffff; color: #243642; selection-background-color: #dcefee; selection-color: #07686c; }
-QPushButton { background: #ffffff; border: 1px solid #cad5dc; border-radius: 5px; padding: 9px 14px; font-weight: 600; }
-QPushButton:hover { background: #eef5f5; border-color: #087f83; }
-QPushButton:checked { color: #07686c; background: #dcf0ef; border-color: #087f83; }
-QPushButton#primary { color: #ffffff; background: #087f83; border: 1px solid #087f83; }
-QPushButton#primary:hover { background: #07676b; }
-QPushButton:disabled, QPushButton#primary:disabled { color: #8b9aa3; background: #eef2f4; border-color: #dce3e8; }
-QPushButton:focus, QTextEdit:focus, QComboBox:focus { border: 2px solid #087f83; }
+#thumbnails { background: #f5f8fd; border: none; border-right: 1px solid #dbe4f1; }
+#thumbnails::item { color: #263449; border: 1px solid transparent; border-radius: 4px; }
+#thumbnails::item:selected { background: #dce8fb; color: #244674; border-color: #365f9e; }
+#selectionPreview { background: #ffffff; border: 1px solid #dbe4f1; border-radius: 4px; }
+QPushButton#appendPdf { color: #8191a7; background: #ffffff; border: 2px dashed #b4c2d5; border-radius: 3px; padding: 0; font-size: 64px; font-weight: 400; }
+QPushButton#appendPdf:hover, QPushButton#appendPdf:focus, QPushButton#appendPdf[dragActive="true"] { color: #365f9e; border-color: #365f9e; background: #edf4ff; }
+QPushButton#appendPdf:disabled { color: #b4c2d5; background: #f5f8fd; border-color: #dbe4f1; }
+QMenu { background: #ffffff; color: #263449; border: 1px solid #c8d4e5; padding: 4px; }
+QMenu::item { background: transparent; color: #263449; padding: 7px 20px; }
+QMenu::item:selected { background: #dce8fb; color: #244674; }
+QMenu::item:disabled { color: #8191a7; }
+QMenu::separator { height: 1px; background: #dbe4f1; margin: 4px 8px; }
+QComboBox QAbstractItemView { background: #ffffff; color: #263449; selection-background-color: #dce8fb; selection-color: #244674; }
+QPushButton { background: #ffffff; border: 1px solid #c8d4e5; border-radius: 5px; padding: 9px 14px; font-weight: 600; }
+QPushButton:hover { background: #edf4ff; border-color: #365f9e; }
+QPushButton:checked { color: #244674; background: #dce8fb; border-color: #365f9e; }
+QPushButton#primary { color: #ffffff; background: #365f9e; border: 1px solid #365f9e; }
+QPushButton#primary:hover { background: #2b4e83; }
+QPushButton:disabled, QPushButton#primary:disabled { color: #8191a7; background: #eef3fa; border-color: #dbe4f1; }
+QPushButton:focus, QTextEdit:focus, QComboBox:focus { border: 2px solid #365f9e; }
 QToolButton { border: 1px solid transparent; border-radius: 2px; background: transparent; padding: 3px; }
-QToolButton:hover, QToolButton:focus { border-color: #087f83; background: #eef5f5; }
+QToolButton:hover, QToolButton:focus { border-color: #365f9e; background: #edf4ff; }
 #tools QToolButton { padding: 2px; }
 #tools QToolButton:!checked:hover, #tools QToolButton:!checked:focus { border-color: transparent; background: transparent; }
-#tools QToolButton:!checked:focus:!hover { background: #dce3e8; }
-QToolButton:checked { border-color: #087f83; background: #dcefee; }
+#tools QToolButton:!checked:focus:!hover { background: #dbe4f1; }
+QToolButton:checked { border-color: #365f9e; background: #dce8fb; }
 QToolButton:disabled { border-color: transparent; background: transparent; }
 QToolButton::menu-indicator { image: none; }
-QTextEdit, QLineEdit, QComboBox { background: #ffffff; border: 1px solid #cad5dc; border-radius: 5px; padding: 8px; selection-background-color: #bce1e0; }
+QTextEdit, QLineEdit, QComboBox { background: #ffffff; border: 1px solid #c8d4e5; border-radius: 5px; padding: 8px; selection-background-color: #c7dbf8; }
+QLineEdit:focus { border-color: #365f9e; }
 QComboBox#fontSize { padding: 2px 6px; }
 QCheckBox { spacing: 6px; }
-QCheckBox:disabled { color: #8b9aa3; }
-QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #8b9aa3; border-radius: 3px; background: #ffffff; }
-QCheckBox::indicator:checked { background: #087f83; border-color: #087f83; image: url("__CHECK_MARK__"); }
-QCheckBox::indicator:unchecked:hover, QCheckBox::indicator:focus { border-color: #087f83; }
-QCheckBox::indicator:checked:hover { background: #07676b; border-color: #07676b; }
-QCheckBox::indicator:disabled { background: #eef2f4; border-color: #cad5dc; }
-QCheckBox::indicator:checked:disabled { background: #8b9aa3; border-color: #8b9aa3; }
-QTextEdit:disabled { background: #f5f8fa; }
-QScrollBar { background: #f2f4f6; border: none; }
+QCheckBox:disabled { color: #8191a7; }
+QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #8191a7; border-radius: 3px; background: #ffffff; }
+QCheckBox::indicator:checked { background: #365f9e; border-color: #365f9e; image: url("__CHECK_MARK__"); }
+QCheckBox::indicator:unchecked:hover, QCheckBox::indicator:focus { border-color: #365f9e; }
+QCheckBox::indicator:checked:hover { background: #2b4e83; border-color: #2b4e83; }
+QCheckBox::indicator:disabled { background: #eef3fa; border-color: #c8d4e5; }
+QCheckBox::indicator:checked:disabled { background: #8191a7; border-color: #8191a7; }
+QTextEdit:disabled { background: #f5f8fd; }
+QScrollBar { background: #f0f4fa; border: none; }
 QScrollBar:vertical { width: 12px; }
 QScrollBar:horizontal { height: 12px; }
-QScrollBar::handle { background: #b8c2ca; border: 3px solid #f2f4f6; border-radius: 5px; }
+QScrollBar::handle { background: #b4c2d5; border: 3px solid #f0f4fa; border-radius: 5px; }
 QScrollBar::handle:vertical { min-height: 28px; }
 QScrollBar::handle:horizontal { min-width: 28px; }
-QScrollBar::handle:hover { background: #8b9aa3; }
-QScrollBar::handle:pressed { background: #607d8b; }
+QScrollBar::handle:hover { background: #8191a7; }
+QScrollBar::handle:pressed { background: #6381ab; }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; border: none; background: transparent; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
-QAbstractScrollArea::corner { background: #f2f4f6; border: none; }
-QSplitter::handle { background: #dce3e8; width: 1px; }
-QStatusBar { background: #f8fafb; border-top: 1px solid #dce3e8; color: #5e6f79; padding: 5px 12px; }
+QAbstractScrollArea::corner { background: #f0f4fa; border: none; }
+QSplitter::handle { background: #dbe4f1; width: 1px; }
+QStatusBar { background: #f8fafd; border-top: 1px solid #dbe4f1; color: #52647b; padding: 5px 12px; }
 #headline { font-size: 34px; font-weight: 600; padding: 15px; }
-#dropZone { border: 2px dashed #b8c8d0; border-radius: 8px; background: #ffffff; }
-#dropZone[dragActive="true"] { border-color: #087f83; background: #eef8f7; }
-#subtitle { font-size: 16px; color: #5e6f79; padding-bottom: 25px; }
+#dropZone { border: 2px dashed #b4c2d5; border-radius: 8px; background: #ffffff; }
+#dropZone[dragActive="true"] { border-color: #365f9e; background: #edf4ff; }
+#subtitle { font-size: 16px; color: #52647b; padding-bottom: 25px; }
 QMessageBox { background: #ffffff; }
 '''.replace('__CHECK_MARK__', (APP_ICON.parent / 'check.svg').as_posix())
 
@@ -2816,24 +2823,24 @@ def apply_light_theme(application):
     palette = application.style().standardPalette()
     for role, color in (
         (QPalette.ColorRole.Window, '#ffffff'),
-        (QPalette.ColorRole.WindowText, '#243642'),
+        (QPalette.ColorRole.WindowText, '#263449'),
         (QPalette.ColorRole.Base, '#ffffff'),
-        (QPalette.ColorRole.AlternateBase, '#f5f8fa'),
-        (QPalette.ColorRole.Text, '#243642'),
+        (QPalette.ColorRole.AlternateBase, '#f5f8fd'),
+        (QPalette.ColorRole.Text, '#263449'),
         (QPalette.ColorRole.Button, '#ffffff'),
-        (QPalette.ColorRole.ButtonText, '#243642'),
+        (QPalette.ColorRole.ButtonText, '#263449'),
         (QPalette.ColorRole.ToolTipBase, '#ffffff'),
-        (QPalette.ColorRole.ToolTipText, '#243642'),
-        (QPalette.ColorRole.Highlight, '#dcefee'),
-        (QPalette.ColorRole.HighlightedText, '#07686c'),
-        (QPalette.ColorRole.Link, '#087f83'),
-        (QPalette.ColorRole.LinkVisited, '#07676b'),
-        (QPalette.ColorRole.PlaceholderText, '#8b9aa3'),
-        (QPalette.ColorRole.Accent, '#087f83'),
+        (QPalette.ColorRole.ToolTipText, '#263449'),
+        (QPalette.ColorRole.Highlight, '#dce8fb'),
+        (QPalette.ColorRole.HighlightedText, '#244674'),
+        (QPalette.ColorRole.Link, '#365f9e'),
+        (QPalette.ColorRole.LinkVisited, '#2b4e83'),
+        (QPalette.ColorRole.PlaceholderText, '#8191a7'),
+        (QPalette.ColorRole.Accent, '#365f9e'),
     ):
         palette.setColor(role, QColor(color))
     for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText):
-        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor('#8b9aa3'))
+        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor('#8191a7'))
     application.setPalette(palette)
     application.setStyleSheet(STYLE)
 
@@ -2873,7 +2880,8 @@ def smoke_test(application, output):
                 page.get_pixmap(matrix=pymupdf.Matrix(2, 2)).save(scan)
             lines = recognize(scan)
             result['ocr_ok'] = any('12345' in line['text'] and pymupdf.Rect(line['bbox']).get_area() > 0 for line in lines)
-        result['resources_ok'] = result['resources_ok'] and not QIcon(str(APP_ICON)).isNull()
+        result['resources_ok'] = result['resources_ok'] and all(
+            not QIcon(str(path)).isNull() for path in (APP_ICON, APP_ICON_LIGHT))
     except Exception as exc:
         result['error'] = str(exc)
     if output:

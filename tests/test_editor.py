@@ -66,8 +66,6 @@ class EditorTests(unittest.TestCase):
         slide = window._editor_slide
         full_width = window.view.width()
         self.assertTrue(panel.isHidden())
-        window.select_range(window.pdf.characters(0)[:3])
-        self.assertTrue(panel.isHidden())
         window.cover_button.click()
         window.select_region((45, 55, 120, 95))
         self.assertTrue(panel.isHidden())
@@ -311,7 +309,7 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(set(visible), {buttons.Save, buttons.Discard})
         self.assertEqual(visible[buttons.Save], 'primary')
         self.assertEqual(len(save_colors), 1)
-        self.assertIn(save_colors[0], ('#087f83', '#07676b'))
+        self.assertIn(save_colors[0], ('#365f9e', '#2b4e83'))
         self.assertEqual(close_results, [True])
         self.assertTrue(window.isVisible())
         self.assertTrue(window.pending)
@@ -397,7 +395,7 @@ class EditorTests(unittest.TestCase):
         self.assertTrue(window.pending)
         self.assertFalse(window.edit_error.isHidden())
 
-    def test_drag_partial_text_delete_and_undo(self):
+    def test_drag_partial_text_opens_editor_and_supports_replacement_delete_and_undo(self):
         window = self.window
         chars = window.pdf.characters(0)
         first, last = (window.view.display_rect(chars[i]['bbox']) for i in (0, 2))
@@ -405,15 +403,28 @@ class EditorTests(unittest.TestCase):
         end = window.view.mapFromScene(QPointF(last.right() - 1, last.center().y()))
         viewport = window.view.viewport()
         QTest.mousePress(viewport, Qt.MouseButton.LeftButton, pos=start)
+        QTest.qWait(QApplication.startDragTime())
         QTest.mouseMove(viewport, end)
         QTest.mouseRelease(viewport, Qt.MouseButton.LeftButton, pos=end)
         self.assertEqual(window.text.toPlainText(), 'INV')
-        self.assertTrue(window.text.isReadOnly())
+        self.assertTrue(window.editor_panel.isVisible())
+        self.assertFalse(window.text.isReadOnly())
+        window.text.setPlainText('REF')
+        QTest.qWait(750)
+        self.assertFalse(window.pending)
+        self.assertIn('REF', window.pdf.document[0].get_text())
+        self.assertIn('OICE 12345', window.pdf.document[0].get_text())
+        window.text.setPlainText('ID')
+        self.assertTrue(window.apply_change())
+        self.assertIn('ID', window.pdf.document[0].get_text())
+        self.assertNotIn('REF', window.pdf.document[0].get_text())
         QTest.keyClick(window.view, Qt.Key.Key_Delete)
         self.assertNotIn('INV', window.pdf.document[0].get_text())
+        self.assertNotIn('ID', window.pdf.document[0].get_text())
         self.assertIn('OICE 12345', window.pdf.document[0].get_text())
         window.undo()
         self.assertIn('INVOICE 12345', window.pdf.document[0].get_text())
+        self.assertFalse(window.pdf.can_undo)
 
     def test_delete_in_text_field_waits_for_auto_apply(self):
         window = self.window
@@ -764,7 +775,7 @@ class EditorTests(unittest.TestCase):
         thumbnails._set_drop_y(gap_y)
         image = thumbnails.viewport().grab().toImage().scaled(thumbnails.viewport().size())
         marker_y = [y for y in range(above.bottom() + 1, below.top())
-                    if image.pixelColor(x, y).name() == '#087f83']
+                    if image.pixelColor(x, y).name() == '#365f9e']
         self.assertIn(len(marker_y), (2, 3))
         self.assertEqual(marker_y[-1] - marker_y[0], len(marker_y) - 1)
 
@@ -1098,19 +1109,71 @@ class EditorTests(unittest.TestCase):
         QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
         moved = pymupdf.Rect(window.selection['bbox'])
         self.assertGreater(moved.x0, bbox[0] + 10)
-        self.assertNotIn('INVOICE', window.pdf.document[0].get_text())
-        image_rect = window.pdf.document[0].get_image_rects(window.pdf.document[0].get_images()[0][0])[0]
-        self.assertAlmostEqual(image_rect.x0, moved.x0, delta=1)
+        spans = [span for span in window.pdf.spans(0) if span['text'] == 'INVOICE 12345']
+        self.assertEqual(len(spans), 1)
+        self.assertTrue(moved.contains(pymupdf.Rect(spans[0]['bbox'])))
         rect = view.display_rect(moved)
         start = view.mapFromScene(rect.bottomRight())
         end = start + QPoint(30, 25)
         QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
         QTest.mouseMove(view.viewport(), end)
         QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
-        self.assertGreater(pymupdf.Rect(window.selection['bbox']).width, moved.width)
+        resized = pymupdf.Rect(window.selection['bbox'])
+        self.assertGreater(resized.width, moved.width)
+        span = next(span for span in window.pdf.spans(0) if span['text'] == 'INVOICE 12345')
+        self.assertTrue(resized.contains(pymupdf.Rect(span['bbox'])))
         window.undo()
         window.undo()
         self.assertAlmostEqual(window.pdf.spans(0)[0]['bbox'][0], 50, delta=1)
+
+    def test_moved_text_can_be_selected_and_edited_after_leaving_area_mode(self):
+        window = self.window
+        source = pymupdf.Rect(window.pdf.spans(0)[0]['bbox']) + (-2, -2, 2, 2)
+        window.cover_button.click()
+        window.select_region(tuple(source))
+        area = source + (80, 175, 80, 175)
+        window.transform_area(tuple(area))
+        QTest.keyClick(window.view, Qt.Key.Key_Escape)
+        moved = next(span for span in window.pdf.spans(0) if span['text'] == 'INVOICE 12345')
+        self.assertTrue(area.contains(pymupdf.Rect(moved['bbox'])))
+        self.assertEqual(window.pdf.document[0].get_text(clip=pymupdf.INFINITE_RECT()).count('TOTAL'), 1)
+        point = window.view.mapFromScene(window.view.display_rect(moved['bbox']).center())
+        QTest.mouseClick(window.view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+        self.assertTrue(window.editor_panel.isVisible())
+        self.assertEqual(window.text.toPlainText(), 'INVOICE 12345')
+        window.text.setPlainText('INVOICE 12346')
+        self.assertTrue(window.apply_change())
+        path = self.root / 'moved.pdf'
+        window.pdf.save_copy(path)
+        with pymupdf.open(path) as saved:
+            self.assertTrue(area.contains(saved[0].search_for('INVOICE 12346')[0]))
+            self.assertEqual(len(saved[0].search_for('TOTAL')), 1)
+            self.assertFalse(saved[0].search_for('INVOICE 12345'))
+
+    def test_recognized_scan_text_moves_and_resizes_with_the_area(self):
+        window = self.window
+        window.open_file(path=self.root / 'scan.png')
+        bounds = window.pdf.document[0].rect
+        scan_scale = pymupdf.Rect(0, 0, 500, 700).torect(bounds)
+        original = pymupdf.Rect(50, 54, 200, 83) * scan_scale
+        source = original + (-3, -3, 3, 3)
+        destination = source + (30, 160, 40, 170)
+        line = {'text': 'INVOICE 12345', 'bbox': tuple(original), 'size': 20, 'color': 0}
+        window.pdf.page_versions[0].ocr = [line]
+        window.cover_button.click()
+        window.select_region(tuple(source))
+        window.transform_area(tuple(destination))
+        moved = window.pdf.page_versions[0].ocr[0]
+        transform = source.torect(destination)
+        self.assertEqual(moved['bbox'], tuple(original * transform))
+        self.assertAlmostEqual(moved['size'], line['size'] * transform.d)
+        QTest.keyClick(window.view, Qt.Key.Key_Escape)
+        point = window.view.mapFromScene(window.view.display_rect(moved['bbox']).center())
+        QTest.mouseClick(window.view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+        self.assertTrue(window.editor_panel.isVisible())
+        self.assertEqual(window.text.toPlainText(), line['text'])
+        window.undo()
+        self.assertEqual(window.pdf.page_versions[0].ocr, [line])
 
     def test_area_cursor_matches_move_and_resize_handles(self):
         window = self.window
@@ -1206,6 +1269,7 @@ class EditorTests(unittest.TestCase):
         with pymupdf.open() as doc:
             page = doc.new_page(width=500, height=700)
             page.insert_text((50, 80), 'Rotated text', fontsize=20)
+            page.set_cropbox(pymupdf.Rect(10, 15, 480, 680))
             page.set_rotation(90)
             doc.save(path)
         window = self.window
@@ -1220,10 +1284,11 @@ class EditorTests(unittest.TestCase):
         QTest.mouseMove(view.viewport(), end)
         QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
         self.assertNotEqual(pymupdf.Rect(window.selection['bbox']), pymupdf.Rect(bbox))
-        self.assertNotIn('Rotated text', window.pdf.document[0].get_text())
-        self.assertTrue(window.pdf.document[0].get_images())
+        moved = next(span for span in window.pdf.spans(0) if span['text'] == 'Rotated text')
+        self.assertTrue(pymupdf.Rect(window.selection['bbox']).contains(pymupdf.Rect(moved['bbox'])))
+        self.assertEqual(window.pdf.document[0].rotation, 90)
         window.undo()
-        self.assertAlmostEqual(window.pdf.spans(0)[0]['bbox'][0], 50, delta=1)
+        self.assertAlmostEqual(window.pdf.spans(0)[0]['bbox'][0], 40, delta=1)
 
     @unittest.skipUnless(os.getenv('RUN_WINDOWS_OCR') == '1', 'Opt-in integration with installed Windows OCR languages')
     def test_real_ocr_then_replace(self):

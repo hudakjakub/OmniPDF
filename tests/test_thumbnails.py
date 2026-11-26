@@ -110,7 +110,7 @@ class ThumbnailTests(unittest.TestCase):
                         self.assertGreater(button.geometry().top() + row.top(), preview_bottom)
                     margin_x = row.right() - 4
                     self.assertEqual({image.pixelColor(margin_x, y).name()
-                                      for y in range(row.top() + top, preview_bottom + 1)}, {'#dcefee'})
+                                      for y in range(row.top() + top, preview_bottom + 1)}, {'#dce8fb'})
                 controls = window.thumbnails.itemWidget(window.thumbnails.item(2))
                 QTest.mouseClick(controls, Qt.MouseButton.LeftButton, pos=controls.rect().center())
                 self.assertEqual(window.page_index, 2)

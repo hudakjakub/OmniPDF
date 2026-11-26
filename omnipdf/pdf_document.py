@@ -2,6 +2,8 @@ import html
 import os
 from dataclasses import dataclass
 from contextlib import nullcontext
+from itertools import groupby
+from operator import itemgetter
 from pathlib import Path
 from statistics import median
 import tempfile
@@ -12,6 +14,15 @@ import pymupdf
 
 TEXT_DICT = pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES
 TEXT_CHARS = pymupdf.TEXTFLAGS_RAWDICT & ~pymupdf.TEXT_PRESERVE_IMAGES
+
+
+def character_lines(characters):
+    for _, group in groupby(characters, key=itemgetter('line')):
+        line = list(group)
+        box = pymupdf.Rect(line[0]['bbox'])
+        for char in line[1:]:
+            box.include_rect(char['bbox'])
+        yield box, line
 
 
 @dataclass(eq=False, slots=True)
@@ -226,13 +237,16 @@ class PdfDocument:
             source.close()
 
     def spans(self, page_index):
-        result = []
-        for block in self.document[page_index].get_text('dict', flags=TEXT_DICT)['blocks']:
+        return [{key: span[key] for key in ('text', 'bbox', 'size', 'color', 'origin')}
+                for span in self._visible_spans(self.document[page_index])]
+
+    @staticmethod
+    def _visible_spans(page):
+        for block in page.get_text('dict', flags=TEXT_DICT)['blocks']:
             for line in block.get('lines', ()):
                 for span in line['spans']:
                     if span['text'].strip() and span.get('alpha', 255):
-                        result.append({key: span[key] for key in ('text', 'bbox', 'size', 'color', 'origin')})
-        return result
+                        yield span
 
     def characters(self, page_index, clip=None, *, include_hidden=False):
         result = []
@@ -244,7 +258,8 @@ class PdfDocument:
                         continue
                     for char in span['chars']:
                         result.append({'text': char['c'], 'bbox': char['bbox'],
-                                       'origin': char['origin'], 'line': line_id})
+                                       'origin': char['origin'], 'line': line_id, 'direction': line['dir'],
+                                       'size': span['size'], 'color': span['color'], 'flags': span['flags']})
                 line_id += 1
         return result
 
@@ -293,6 +308,9 @@ class PdfDocument:
         return hits
 
     def delete_characters(self, page_index, characters):
+        self._replace_characters(page_index, characters, '', 11, 0, False)
+
+    def _replace_characters(self, page_index, characters, text, fontsize, color, background):
         page = self.document[page_index]
         remaining = self.characters(page_index)
         selected = []
@@ -307,6 +325,7 @@ class PdfDocument:
             raise ValueError('Strana obsahuje existujúce redakcie. Pred úpravou ich odstráňte alebo použite inú kópiu.')
         page_rect = page.rect * page.derotation_matrix
         images = [pymupdf.Rect(image['bbox']) for image in page.get_image_info()]
+        neighbors = [pymupdf.Rect(char['bbox']) for char in remaining]
         rectangles = []
         for char in selected:
             rect = pymupdf.Rect(char['bbox'])
@@ -316,14 +335,35 @@ class PdfDocument:
                 raise ValueError('Text je nad obrázkom. Zakryte ho ikonou obdĺžnika a pridajte nový text ikonou T.')
             redaction = pymupdf.Rect(rect.x0 + rect.width * 0.45, rect.y0 + rect.height * 0.25,
                                      rect.x1 - rect.width * 0.45, rect.y1 - rect.height * 0.25)
-            if any(redaction.intersects(pymupdf.Rect(other['bbox'])) for other in remaining):
+            if any(redaction.intersects(other) for other in neighbors):
                 raise ValueError('The selected area overlaps neighboring text.')
             rectangles.append(redaction)
+        lines = list(character_lines(selected)) if text or background else []
+        replacements = text.split('\n') if text else []
+        if len(replacements) > len(lines):
+            raise ValueError('The replacement text does not fit in the selected area.')
+        if background and any(box.intersects(other) for box, _ in lines for other in neighbors):
+            raise ValueError('The selected area overlaps neighboring text.')
+        spans = list(self._visible_spans(page)) if replacements else []
+        whole_spans = {tuple(span['bbox']) for span in spans}
         before = self._capture()
         try:
             for rect in rectangles:
                 page.add_redact_annot(rect, fill=False)
             page.apply_redactions(images=0, graphics=0, text=0)
+            if background:
+                for box, _ in lines:
+                    page.draw_rect(box, color=None, fill=(1, 1, 1))
+            for (box, line), replacement in zip(lines, replacements):
+                if replacement:
+                    rotation = self._rotation(line[0]['direction'])
+                    strip = self._text_strip(box, rotation)
+                    if any(strip.intersects(other) for other in neighbors):
+                        raise ValueError('The selected area overlaps neighboring text.')
+                    align_right = (rotation == 0 and tuple(box) in whole_spans
+                                   and self._is_right_aligned(box, spans))
+                    self._insert_replacement(page, box, replacement, fontsize, color, line[0], rotation,
+                                             align_right=align_right)
         except Exception:
             self._restore_state(before)
             raise
@@ -392,14 +432,47 @@ class PdfDocument:
             page.apply_redactions(images=2, graphics=0, text=0)
             if destination is not None:
                 with pymupdf.open('pdf', before[0]) as source:
-                    source[page_index].set_rotation(0)
-                    image = source[page_index].get_pixmap(matrix=pymupdf.Matrix(3, 3), clip=rect, alpha=False, annots=False)
-                    page.insert_image(target, stream=image.tobytes('png'), keep_proportion=False, overlay=True)
+                    self._insert_region(page, source, page_index, rect, target)
         except Exception:
             self._restore_state(before)
             raise
         self._record(before, page_index)
         return color
+
+    def _insert_region(self, page, source, page_index, rect, target):
+        source_page = source[page_index]
+        source_page.set_rotation(0)
+        rotation = page.rotation
+        page.set_rotation(0)
+        if any(rect.intersects(pymupdf.Rect(span['bbox'])) for span in self._visible_spans(source_page)):
+            # A display clip alone would import text and images from outside the selection.
+            source_page.clip_to_rect(rect)
+            self._clear_image_pixels_outside(source_page, rect)
+            page.draw_rect(target, color=None, fill=(1, 1, 1))
+            page.show_pdf_page(target, source, page_index, keep_proportion=False, clip=rect)
+        else:
+            image = source_page.get_pixmap(matrix=pymupdf.Matrix(3, 3), clip=rect, alpha=False, annots=False)
+            page.insert_image(target, stream=image.tobytes('png'), keep_proportion=False, overlay=True)
+        page.set_rotation(rotation)
+
+    @staticmethod
+    def _clear_image_pixels_outside(page, rect):
+        bounds = pymupdf.Rect(rect)
+        for image in page.get_image_info():
+            bounds.include_rect(image['bbox'])
+        if bounds == rect:
+            return
+        strips = (
+            pymupdf.Rect(bounds.x0, bounds.y0, rect.x0, bounds.y1),
+            pymupdf.Rect(rect.x1, bounds.y0, bounds.x1, bounds.y1),
+            pymupdf.Rect(rect.x0, bounds.y0, rect.x1, rect.y0),
+            pymupdf.Rect(rect.x0, rect.y1, rect.x1, bounds.y1),
+        )
+        for strip in strips:
+            if not strip.is_empty:
+                page.add_redact_annot(strip, fill=False)
+        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS,
+                              graphics=pymupdf.PDF_REDACT_LINE_ART_NONE, text=pymupdf.PDF_REDACT_TEXT_NONE)
 
     def transform_region(self, page_index, bbox, destination, baseline):
         current = self._capture()
@@ -415,17 +488,50 @@ class PdfDocument:
             self._restore_state(current)
             raise
 
-    def replace_text(self, page_index, bbox, text, fontsize=11, color=0, background=False, *, update_previous=False, insert_only=False):
+    @staticmethod
+    def _rotation(direction):
+        rotation = {(1, 0): 0, (0, -1): 90, (-1, 0): 180, (0, 1): 270}.get(
+            tuple(round(value, 6) for value in direction))
+        if rotation is None:
+            raise ValueError('Text at this angle cannot be edited directly.')
+        return rotation
+
+    @staticmethod
+    def _text_strip(rect, rotation):
+        if rotation in (90, 270):
+            inset = rect.width * 0.25
+            return rect + (inset, 0, -inset, 0)
+        inset = rect.height * 0.25
+        return rect + (0, inset, 0, -inset)
+
+    @staticmethod
+    def _is_right_aligned(rect, spans):
+        center_y = (rect.y0 + rect.y1) / 2
+        tolerance = min(2, max(0.75, rect.height * 0.12))
+        left_matches = right_matches = 0
+        for span in spans:
+            other = pymupdf.Rect(span['bbox'])
+            distance = abs((other.y0 + other.y1) / 2 - center_y)
+            if rect.height * 0.45 < distance <= rect.height * 8:
+                left_matches += abs(other.x0 - rect.x0) <= tolerance
+                right_matches += abs(other.x1 - rect.x1) <= tolerance
+        return right_matches > left_matches
+
+    def replace_text(self, page_index, bbox, text, fontsize=11, color=0, background=False, *,
+                     update_previous=False, insert_only=False, characters=None):
+        characters = tuple(characters) if characters is not None else None
+        selection = (page_index, tuple(bbox), insert_only, characters)
         if update_previous:
             if (not self._undo or not self._last_replace
                     or self._last_replace[0] is not self._undo[-1]
-                    or self._last_replace[1:] != (page_index, tuple(bbox), insert_only)):
+                    or self._last_replace[1:] != selection):
                 raise ValueError('There is no previous edit to update.')
             current = self._capture()
             original = self._undo.pop()
             try:
                 self._restore_state(original)
-                self.replace_text(page_index, bbox, text, fontsize, color, background, insert_only=insert_only)
+                self.replace_text(page_index, bbox, text, fontsize, color, background,
+                                  insert_only=insert_only, characters=characters)
             except Exception:
                 self._restore_state(current)
                 self._undo.append(original)
@@ -437,26 +543,32 @@ class PdfDocument:
             raise ValueError('Select a valid area inside the page.')
         if not isinstance(text, str) or fontsize <= 0:
             raise ValueError('Enter valid text and font size.')
+        if characters is not None:
+            self._replace_characters(page_index, characters, text, fontsize, color, background)
+            self._last_replace = (self._undo[-1], *selection)
+            return
         redaction = pymupdf.Rect(rect)
-        native, direction = (None, None) if insert_only else next(
-            ((span, line['dir']) for block in page.get_text('dict', flags=TEXT_DICT)['blocks']
-             for line in block.get('lines', ()) for span in line['spans']
+        lines = () if insert_only else tuple(
+            line for block in page.get_text('dict', flags=TEXT_DICT)['blocks'] for line in block.get('lines', ()))
+        native, direction = next(
+            ((span, line['dir']) for line in lines for span in line['spans']
              if span.get('alpha', 255) and pymupdf.Rect(span['bbox']) == rect), (None, None))
         over_image = not insert_only and any(
             rect.intersects(pymupdf.Rect(image['bbox'])) for image in page.get_image_info())
         rotation = 0
+        align_right = False
         if native:
             if over_image:
                 raise ValueError('Text je nad obrázkom. Zakryte ho ikonou obdĺžnika a pridajte nový text ikonou T.')
-            rotation = {(1, 0): 0, (0, -1): 90, (-1, 0): 180, (0, 1): 270}.get(tuple(round(value, 6) for value in direction))
-            if rotation is None:
-                raise ValueError('Text at this angle cannot be edited directly.')
-            if rotation in (90, 270):
-                redaction.x0 += rect.width * 0.25
-                redaction.x1 -= rect.width * 0.25
-            else:
-                redaction.y0 += rect.height * 0.25
-                redaction.y1 -= rect.height * 0.25
+            rotation = self._rotation(direction)
+            redaction = self._text_strip(rect, rotation)
+            align_right = rotation == 0 and self._is_right_aligned(
+                rect, (span for line in lines if line['dir'] == direction for span in line['spans']
+                       if span['text'].strip() and span.get('alpha', 255)))
+        elif not insert_only:
+            ocr = self.page_versions[page_index].ocr or ()
+            if any(pymupdf.Rect(span['bbox']) == rect for span in ocr):
+                align_right = self._is_right_aligned(rect, ocr)
         allowed = rect + (-0.05, -0.05, 0.05, 0.05)
         if not insert_only:
             for block in page.get_text('rawdict', flags=TEXT_CHARS)['blocks']:
@@ -468,14 +580,6 @@ class PdfDocument:
                                 raise ValueError('The selected area overlaps neighboring text.')
         if not insert_only and any(annot.type[0] == pymupdf.PDF_ANNOT_REDACT for annot in (page.annots() or ())):
             raise ValueError('Strana obsahuje existujúce redakcie. Pred úpravou ich odstráňte alebo použite inú kópiu.')
-        font = None
-        fallback = False
-        if text and native and '\n' not in text:
-            # shortcut: replacement uses Segoe UI rather than the original font, use font matching when exact typography is required.
-            suffix = 'z' if native['flags'] & 18 == 18 else ('b' if native['flags'] & 16 else ('i' if native['flags'] & 2 else ''))
-            fontfile = str(Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts' / f'segoeui{suffix}.ttf')
-            font = pymupdf.Font(fontfile=fontfile)
-            fallback = any(not font.has_glyph(ord(char), fallback=False) for char in text)
         before = self._capture()
         try:
             if not insert_only:
@@ -488,30 +592,47 @@ class PdfDocument:
                                   for char in self.characters(page_index, clip=allowed, include_hidden=True)):
                     raise ValueError('The original text could not be removed safely.')
             if text:
-                rgb = '#%06x' % (color & 0xffffff)
-                content = html.escape(text).replace('\n', '<br>')
-                if font is not None and not fallback:
-                    width = font.text_length(text, fontsize=fontsize)
-                    available = rect.height if rotation in (90, 270) else rect.width
-                    fitted = min(fontsize, native['size'], fontsize * available / width) if width else min(fontsize, native['size'])
-                    if fitted < fontsize * 0.7:
-                        raise ValueError('The replacement text does not fit in the selected area.')
-                    page.insert_font(fontname='editor' + (suffix or 'regular'), fontfile=fontfile)
-                    inserted = page.insert_text(native['origin'], text, fontsize=fitted, rotate=rotation,
-                                                fontname='editor' + (suffix or 'regular'), color=tuple(int(rgb[i:i+2], 16) / 255 for i in (1, 3, 5)))
-                    if inserted < 1:
-                        raise ValueError('The replacement text does not fit in the selected area.')
-                else:
-                    spare, _ = page.insert_htmlbox(rect, content, css=f'body, p {{ margin: 0; padding: 0; line-height: 1; }} * {{ font-family: sans-serif; font-size: {fontsize}pt; color: {rgb}; }}', scale_low=0.7, rotate=rotation)
-                    if spare < 0:
-                        raise ValueError('The replacement text does not fit in the selected area.')
-                    if fallback and normalize('NFC', ''.join(text.split())) != normalize('NFC', ''.join(page.get_textbox(rect).split())):
-                        raise ValueError('Some characters in the replacement text cannot be rendered.')
+                self._insert_replacement(page, rect, text, fontsize, color, native, rotation,
+                                         align_right=align_right)
         except Exception:
             self._restore_state(before)
             raise
         self._record(before, page_index)
-        self._last_replace = (self._undo[-1], page_index, tuple(rect), insert_only)
+        self._last_replace = (self._undo[-1], *selection)
+
+    @staticmethod
+    def _insert_replacement(page, rect, text, fontsize, color, native, rotation, *, align_right=False):
+        font = None
+        fallback = False
+        if native and '\n' not in text:
+            # shortcut: replacement uses Segoe UI rather than the original font, use font matching when exact typography is required.
+            suffix = 'z' if native['flags'] & 18 == 18 else ('b' if native['flags'] & 16 else ('i' if native['flags'] & 2 else ''))
+            fontfile = str(Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts' / f'segoeui{suffix}.ttf')
+            font = pymupdf.Font(fontfile=fontfile)
+            fallback = any(not font.has_glyph(ord(char), fallback=False) for char in text)
+        rgb = '#%06x' % (color & 0xffffff)
+        if font is not None and not fallback:
+            width = font.text_length(text, fontsize=fontsize)
+            available = rect.height if rotation in (90, 270) else rect.width
+            fitted = min(fontsize, native['size'], fontsize * available / width) if width else min(fontsize, native['size'])
+            if fitted < fontsize * 0.7:
+                raise ValueError('The replacement text does not fit in the selected area.')
+            origin = native['origin']
+            if align_right:
+                origin = (rect.x1 - font.text_length(text, fontsize=fitted), origin[1])
+            page.insert_font(fontname='editor' + (suffix or 'regular'), fontfile=fontfile)
+            inserted = page.insert_text(origin, text, fontsize=fitted, rotate=rotation,
+                                        fontname='editor' + (suffix or 'regular'), color=tuple(int(rgb[i:i+2], 16) / 255 for i in (1, 3, 5)))
+            if inserted < 1:
+                raise ValueError('The replacement text does not fit in the selected area.')
+        else:
+            content = html.escape(text).replace('\n', '<br>')
+            alignment = ' text-align: right;' if align_right else ''
+            spare, _ = page.insert_htmlbox(rect, content, css=f'body, p {{ margin: 0; padding: 0; line-height: 1;{alignment} }} * {{ font-family: sans-serif; font-size: {fontsize}pt; color: {rgb}; }}', scale_low=0.7, rotate=rotation)
+            if spare < 0:
+                raise ValueError('The replacement text does not fit in the selected area.')
+            if fallback and normalize('NFC', ''.join(text.split())) != normalize('NFC', ''.join(page.get_textbox(rect).split())):
+                raise ValueError('Some characters in the replacement text cannot be rendered.')
 
     def undo(self):
         if not self._undo:

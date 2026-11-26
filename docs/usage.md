@@ -3,9 +3,9 @@
 ## Edit a document
 
 1. Open a PDF, JPG or PNG using the open button or by dragging a file into the window. The app asks what to do with unsaved changes before opening another document.
-2. Click text to edit it in the side panel. The preview updates automatically shortly after typing stops. If the text does not fit, the last valid version remains visible and the panel explains the problem.
-3. Drag across text and press **Delete** to remove a selection. Clicking selects a text span; **Escape** cancels the selection or active tool. The selection stays on its original page when you scroll.
-4. Click the **T** tool to add a text box. Click once for a default-sized box or drag to choose its size, then start typing. Use the dashed rectangle tool to select an area to move, resize or delete.
+2. Click a text span or drag across the exact text you want to edit. The side panel opens when you release the mouse. The preview updates automatically shortly after typing stops. If the text does not fit, the last valid version remains visible and the panel explains the problem.
+3. Press **Delete** on the page to remove the selection. Press **Escape** to cancel the selection or active tool. The selection stays on its original page when you scroll.
+4. Click the **T** tool to add a text box. Click once for a default-sized box or drag to choose its size, then start typing. Use the dashed rectangle tool to move, resize or delete an area. Press **Escape** to return to editing the text in its new position.
 5. Text on scanned pages and photographs is recognized in the background. Check recognized text before saving.
 
 The left sidebar shows page thumbnails. Click a thumbnail to navigate, or use **Ctrl+click** and **Shift+click** to select multiple pages. Drag selected thumbnails to reorder them. The page management menu offers actions such as rotating, duplicating and deleting pages. Use the **+** card to append another PDF; it remains available even after deleting the last page.

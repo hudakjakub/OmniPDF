@@ -21,8 +21,8 @@ class WindowChromeTests(unittest.TestCase):
         window_chrome.configure_title_bar(hwnd)
         self.assertEqual(calls, [
             (hwnd, 20, 0, 4), (hwnd, 19, 0, 4),
-            (hwnd, 34, 0xE8E3DC, 4), (hwnd, 35, 0xFFFFFF, 4),
-            (hwnd, 36, 0x423624, 4),
+            (hwnd, 34, 0xF1E4DB, 4), (hwnd, 35, 0xFFFFFF, 4),
+            (hwnd, 36, 0x493426, 4),
         ])
         self.assertEqual(set_attribute.argtypes[0], ctypes.c_void_p)
         self.assertEqual(set_attribute.restype, ctypes.c_int32)

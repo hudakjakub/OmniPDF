@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.21
+
+- Use the blue pencil logo and blue theme, with sharper Windows icons and a clearer title-bar logo.
+- Simplify the text editor and open it when you drag to select text.
+- Keep PDF text selectable and searchable when moving or resizing an area.
+- Preserve the original right edge when replacing right-aligned prices and other text.
+
 ## 0.1.20
 
 - Publish one portable Windows EXE and update it in place.

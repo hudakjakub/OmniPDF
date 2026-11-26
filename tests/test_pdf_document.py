@@ -372,6 +372,54 @@ class PdfDocumentTests(unittest.TestCase):
         finally:
             pdf.close()
 
+    def test_price_replacement_keeps_the_column_edge(self):
+        prices = ('CZK3,529.00', 'CZK11,115.00', 'Paid', 'CZK7,996.04')
+        for right_aligned, dragged in ((True, False), (True, True), (False, False)):
+            with self.subTest(right_aligned=right_aligned, dragged=dragged):
+                path = self.root / f'price-{right_aligned}-{dragged}.pdf'
+                size = 12
+                font = pymupdf.Font('helv')
+                with pymupdf.open() as document:
+                    page = document.new_page(width=280, height=200)
+                    for row, text in enumerate(prices):
+                        x = 240 - font.text_length(text, fontsize=size) if right_aligned else 40
+                        page.insert_text((x, 45 + row * 18), text, fontsize=size)
+                    document.save(path)
+                pdf = PdfDocument(path)
+                try:
+                    original = next(span for span in pdf.spans(0) if span['text'] == prices[1])
+                    box = pymupdf.Rect(original['bbox'])
+                    chars = [char for char in pdf.characters(0) if box.contains(char['bbox'])] if dragged else None
+                    pdf.replace_text(0, box, 'CZK15,115.00', fontsize=size, characters=chars)
+                    changed = next(span for span in pdf.spans(0) if span['text'] == 'CZK15,115.00')
+                    updated = pymupdf.Rect(changed['bbox'])
+                    self.assertGreater(abs(box.width - updated.width), 1)
+                    self.assertAlmostEqual(changed['origin'][1], original['origin'][1], delta=0.02)
+                    edge = 'x1' if right_aligned else 'x0'
+                    self.assertAlmostEqual(getattr(updated, edge), getattr(box, edge), delta=0.05)
+                    pdf.replace_text(0, box, 'CZK5,115.00', fontsize=size,
+                                     characters=chars, update_previous=True)
+                    out = self.root / f'edited-price-{right_aligned}-{dragged}.pdf'
+                    pdf.save_copy(out)
+                    with pymupdf.open(out) as saved:
+                        matches = saved[0].search_for('CZK5,115.00')
+                        self.assertEqual(len(matches), 1)
+                        self.assertAlmostEqual(getattr(matches[0], edge), getattr(box, edge), delta=0.05)
+                finally:
+                    pdf.close()
+
+    def test_recognized_price_replacement_keeps_the_right_edge(self):
+        box = pymupdf.Rect(120, 175, 200, 196)
+        self.pdf.page_versions[0].ocr = [
+            {'text': 'CZK3,529.00', 'bbox': (138, 150, 200, 171)},
+            {'text': 'CZK11,115.00', 'bbox': tuple(box)},
+            {'text': 'Paid', 'bbox': (174, 200, 200, 221)},
+        ]
+        self.pdf.replace_text(0, box, 'CZK15,115.00', fontsize=12)
+        matches = self.pdf.document[0].search_for('CZK15,115.00')
+        self.assertEqual(len(matches), 1)
+        self.assertAlmostEqual(matches[0].x1, box.x1, delta=0.1)
+
     def test_delete_partial_text_across_lines_is_one_undo(self):
         doc = pymupdf.open()
         page = doc.new_page()
@@ -403,6 +451,64 @@ class PdfDocumentTests(unittest.TestCase):
             self.assertIn('INVOICE12345', pdf.document[0].get_text())
             self.assertIn('Neighbor', pdf.document[0].get_text())
             self.assertFalse(pdf.undo())
+        finally:
+            pdf.close()
+
+    def test_replace_partial_text_across_lines_keeps_neighbors_and_rolls_back(self):
+        path = self.root / 'replacement-range.pdf'
+        with pymupdf.open() as doc:
+            page = doc.new_page()
+            page.insert_text((30, 60), 'INVOICE 12345', fontsize=12)
+            page.insert_text((30, 73), 'Neighbor text', fontsize=12)
+            page.draw_rect((20, 42, 180, 80), color=(1, 0.8, 0))
+            doc.save(path)
+        pdf = PdfDocument(path)
+        try:
+            selected = pdf.characters(0)[8:16]
+            box = pymupdf.Rect()
+            for char in selected:
+                box.include_rect(char['bbox'])
+            pdf.replace_text(0, tuple(box), '42\nAB', fontsize=12, characters=selected)
+            edited = pdf.document[0].get_text()
+            for text in ('INVOICE', 'ghbor text', '42', 'AB'):
+                self.assertIn(text, edited)
+            for original in ('12345', 'Neighbor text'):
+                self.assertNotIn(original, edited)
+            self.assertTrue(pdf.document[0].get_drawings())
+            with self.assertRaisesRegex(ValueError, 'does not fit'):
+                pdf.replace_text(0, tuple(box), '43\n' + 'Wide text ' * 20,
+                                 fontsize=12, characters=selected, update_previous=True)
+            self.assertEqual(pdf.document[0].get_text(), edited)
+            self.assertTrue(pdf.undo())
+            self.assertIn('INVOICE 12345', pdf.document[0].get_text())
+            self.assertIn('Neighbor text', pdf.document[0].get_text())
+            self.assertFalse(pdf.can_undo)
+        finally:
+            pdf.close()
+
+    def test_moving_text_with_image_background_does_not_copy_pixels_outside_selection(self):
+        source = self.root / 'mixed-area.pdf'
+        with pymupdf.open() as doc:
+            page = doc.new_page(width=220, height=400)
+            image = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 100, 100), False)
+            image.clear_with(150)
+            page.insert_image(pymupdf.Rect(0, 0, 200, 200), pixmap=image)
+            page.insert_text((25, 50), 'Selected text')
+            page.insert_text((25, 160), 'Outside text')
+            doc.save(source)
+        pdf = PdfDocument(source)
+        try:
+            original = pymupdf.Rect(20, 22, 120, 60)
+            target = original + (0, 235, 0, 235)
+            pdf.cover_region(0, original, target)
+            page = pdf.document[0]
+            self.assertTrue(target.contains(page.search_for('Selected text')[0]))
+            self.assertEqual(page.get_text(clip=pymupdf.INFINITE_RECT()).count('Outside text'), 1)
+            moved = next(image for image in page.get_image_info(xrefs=True)
+                         if target.intersects(pymupdf.Rect(image['bbox'])))
+            pixels = pymupdf.Pixmap(pdf.document, moved['xref'])
+            self.assertEqual(pixels.pixel(0, 0), (255, 255, 255))
+            self.assertEqual(pixels.pixel(20, 20), (150, 150, 150))
         finally:
             pdf.close()
 

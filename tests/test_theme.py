@@ -55,7 +55,7 @@ class LightThemeTests(unittest.TestCase):
                            self.window.font_size.view(), self.window.white_background,
                            self.window.text, QLineEdit(self.window), file_dialog, message):
                 self.assert_light(widget)
-            self.assertEqual(file_dialog.palette().color(QPalette.ColorRole.Highlight).name(), '#dcefee')
+            self.assertEqual(file_dialog.palette().color(QPalette.ColorRole.Highlight).name(), '#dce8fb')
             context_menu.close()
             file_dialog.close()
             message.close()
@@ -71,7 +71,7 @@ class LightThemeTests(unittest.TestCase):
         row = menu.actionGeometry(self.window.duplicate_page_action)
         selected = image.pixelColor(row.left() + 2, row.center().y())
         self.assertGreater(selected.lightness(), 190)
-        self.assertGreater(selected.green(), selected.red())
+        self.assertGreater(selected.blue(), selected.green())
         menu.close()
 
 

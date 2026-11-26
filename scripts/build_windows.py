@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+from struct import pack
 import subprocess
 import sys
 
@@ -41,13 +42,38 @@ def build_environment():
     return environment
 
 
+def write_windows_icon(source, destination):
+    from PySide6.QtCore import QBuffer, QIODevice, QSize, Qt
+    from PySide6.QtGui import QIcon
+
+    sizes = (16, 20, 24, 28, 32, 36, 40, 48, 56, 60, 64, 72, 84, 96, 128, 256)
+    icon = QIcon(str(source))
+    directory = bytearray(pack('<3H', 0, 1, len(sizes)))
+    images = bytearray()
+    offset = len(directory) + 16 * len(sizes)
+    for size in sizes:
+        # Render from the vector at each size to retain antialiased strokes.
+        pixmap = icon.pixmap(QSize(size * 3, size * 3), 1.0)
+        pixmap = pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                              Qt.TransformationMode.SmoothTransformation)
+        buffer = QBuffer()
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not pixmap.save(buffer, 'PNG'):
+            raise RuntimeError(f'Could not render the {size}px application icon')
+        image = buffer.data()
+        dimension = size % 256  # ICO encodes 256 with a zero byte.
+        directory.extend(pack('<4B2H2I', dimension, dimension, 0, 0, 1, 32,
+                              image.size(), offset + len(images)))
+        images.extend(bytes(image))
+    destination.write_bytes(directory + images)
+
+
 def main():
     validate_version(VERSION, os.environ.get('RELEASE_TAG') or None)
     if sys.argv[1:] == ['--validate']:
         return
     if sys.platform != 'win32':
         raise SystemExit('Windows is required for the build')
-    from PySide6.QtGui import QIcon
     from PySide6.QtCore import QLibraryInfo
     from PySide6.QtWidgets import QApplication
 
@@ -96,9 +122,7 @@ def main():
     release = ROOT / 'release'
     release.mkdir(exist_ok=True)
     app = QApplication.instance() or QApplication([])
-    icon = QIcon(str(ROOT / 'omnipdf' / 'assets' / 'omni.svg'))
-    if not icon.pixmap(256, 256).save(str(build / 'omni.ico'), 'ICO'):
-        raise RuntimeError('Could not render the application icon')
+    write_windows_icon(ROOT / 'omnipdf' / 'assets' / 'omni.svg', build / 'omni.ico')
     (build / 'version.txt').write_text(version_metadata(VERSION), encoding='utf-8')
     subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--windowed',
                     '--name', Path(PORTABLE_NAME).stem, '--distpath', str(release), '--specpath', str(build),

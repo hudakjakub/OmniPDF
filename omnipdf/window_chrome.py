@@ -14,7 +14,7 @@ def configure_title_bar(hwnd: int) -> None:
         light = ctypes.c_int32(0)
         if set_attribute(hwnd, 20, ctypes.byref(light), ctypes.sizeof(light)) != 0:
             set_attribute(hwnd, 19, ctypes.byref(light), ctypes.sizeof(light))
-        for attribute, color in ((34, 0xE8E3DC), (35, 0xFFFFFF), (36, 0x423624)):
+        for attribute, color in ((34, 0xF1E4DB), (35, 0xFFFFFF), (36, 0x493426)):
             value = ctypes.c_uint32(color)
             set_attribute(hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value))
     except (OSError, AttributeError):
