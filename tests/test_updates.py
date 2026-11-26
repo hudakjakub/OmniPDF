@@ -12,10 +12,10 @@ from omnipdf import updates
 
 
 class UpdateTests(unittest.TestCase):
-    content = b"installer"
+    content = b"portable executable"
     digest = hashlib.sha256(content).hexdigest()
     tag = "v0.10.0"
-    filename = "OmniPDF-Setup-0.10.0-windows-x64.exe"
+    filename = updates.PORTABLE_NAME
     url = f"https://github.com/{updates.RELEASE_REPOSITORY}/releases/download/{tag}/{filename}"
 
     def metadata(self):
@@ -29,39 +29,51 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.check(self.metadata()).version, "0.10.0")
         self.assertIsNone(self.check(self.metadata(), "0.11.0"))
 
-    def test_unversioned_installer_and_legacy_compatibility(self):
-        filename = 'OmniPDF-Setup-windows-x64.exe'
-        url = self.url.rsplit('/', 1)[0] + '/' + filename
+    def test_only_the_portable_asset_is_used(self):
+        previous_asset = 'OmniPDF-Setup-windows-x64.exe'
+        url = self.url.rsplit('/', 1)[0] + '/' + previous_asset
         data = self.metadata()
-        data['assets'].append({'name': filename, 'browser_download_url': url,
+        data['assets'].insert(0, {'name': previous_asset, 'browser_download_url': url,
                                'size': len(self.content), 'digest': 'sha256:' + self.digest})
-        release = self.check(data)
-        self.assertEqual(release.asset_url, url)
-        with tempfile.TemporaryDirectory() as folder:
-            with patch.object(updates, '_open', return_value=io.BytesIO(self.content)):
-                path = updates.download_update(release, folder)
-            self.assertEqual(path.name, filename)
-            updates.verify_installer(path, release)
-            path.write_bytes(b'tampered')
-            with self.assertRaises(updates.UpdateError):
-                updates.verify_installer(path, release)
-        self.assertEqual(self.check(self.metadata()).asset_url, self.url)
-        data['assets'].append(data['assets'][-1])
+        self.assertEqual(self.check(data).asset_url, self.url)
+        portable = data['assets'].pop()
+        with self.assertRaises(updates.UpdateError):
+            self.check(data)
+        data['assets'].extend((portable, portable))
         with self.assertRaises(updates.UpdateError):
             self.check(data)
 
-    def test_unversioned_installer_checksum_file_and_url_validation(self):
-        filename = 'OmniPDF-Setup-windows-x64.exe'
-        url = self.url.rsplit('/', 1)[0] + '/' + filename
-        data = self.metadata()
-        data['assets'] = [
-            {'name': filename, 'browser_download_url': url, 'size': len(self.content)},
-            {'name': 'SHA256SUMS.txt', 'browser_download_url': self.url.rsplit('/', 1)[0] + '/SHA256SUMS.txt'},
-        ]
-        with patch.object(updates, '_open', side_effect=[io.BytesIO(json.dumps(data).encode()), io.BytesIO(f'{self.digest}  {filename}\n'.encode())]):
-            release = updates.check_for_update('0.9.0')
-        self.assertEqual(release.checksum, self.digest)
-        for bad_url in (url.replace('github.com', 'evil.test'), url.replace(self.tag, 'v0.9.0'), url + '?x=1', url.replace(filename, 'other.exe')):
+    def test_portable_replaces_the_existing_executable_and_rolls_back_a_failed_restart(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / updates.PORTABLE_NAME
+            source.write_bytes(self.content)
+            portable = root / 'My renamed copy.exe'
+            portable.write_bytes(b'original')
+            def wait(pid):
+                self.assertEqual(pid, 42)
+                self.assertEqual(portable.read_bytes(), b'original')
+            def fail_start(arguments):
+                self.assertEqual(arguments, [str(portable.resolve())])
+                self.assertEqual(portable.read_bytes(), self.content)
+                raise updates.UpdateError('Could not start')
+            arguments = (source, portable, '42', updates.VERSION, self.digest, str(len(self.content)))
+            with patch.object(updates, '_wait_for_parent', side_effect=wait), \
+                 patch.object(updates, '_start_executable', side_effect=fail_start):
+                with self.assertRaisesRegex(updates.UpdateError, 'Could not start'):
+                    updates.apply_portable_update(*arguments)
+            self.assertEqual(portable.read_bytes(), b'original')
+            with patch.object(updates, '_wait_for_parent', side_effect=wait), \
+                 patch.object(updates, '_start_executable') as start:
+                updates.apply_portable_update(*arguments)
+                start.assert_called_once_with([str(portable.resolve())])
+            self.assertEqual(portable.read_bytes(), self.content)
+            self.assertEqual(set(root.iterdir()), {source, portable})
+
+    def test_download_revalidates_the_url(self):
+        release = self.check(self.metadata())
+        for bad_url in (self.url.replace('github.com', 'evil.test'), self.url.replace(self.tag, 'v0.9.0'),
+                        self.url + '?x=1', self.url.replace(self.filename, 'other.exe')):
             bad = updates.Release(release.version, bad_url, self.digest, len(self.content))
             with tempfile.TemporaryDirectory() as folder, self.assertRaises(updates.UpdateError):
                 updates.download_update(bad, folder)
@@ -94,12 +106,14 @@ class UpdateTests(unittest.TestCase):
                 handler.redirect_request(req, None, 302, "", {}, url)
         self.assertIsNotNone(handler.redirect_request(req, None, 302, "", {}, "https://release-assets.githubusercontent.com/a"))
 
-    def test_checksum_file(self):
+    def test_missing_or_invalid_github_digest_is_rejected(self):
         data = self.metadata()
         del data["assets"][0]["digest"]
-        data["assets"].append({"name": "SHA256SUMS.txt", "browser_download_url": self.url.rsplit("/", 1)[0] + "/SHA256SUMS.txt"})
-        with patch.object(updates, "_open", side_effect=[io.BytesIO(json.dumps(data).encode()), io.BytesIO(f"{self.digest}  {self.filename}\n".encode())]):
-            self.assertEqual(updates.check_for_update("0.9.0").checksum, self.digest)
+        with self.assertRaisesRegex(updates.UpdateError, 'checksum'):
+            self.check(data)
+        data["assets"][0]["digest"] = 'sha256:invalid'
+        with self.assertRaisesRegex(updates.UpdateError, 'checksum'):
+            self.check(data)
 
     def test_download_verifies_and_rolls_back(self):
         release = updates.Release("0.10.0", self.url, self.digest, len(self.content))
@@ -126,9 +140,13 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(progress[-1], (len(self.content), len(self.content)))
 
     def test_launch_args(self):
+        release = self.check(self.metadata())
+        path = f'C:/temp/{self.filename}'
+        target = 'C:/Apps/Renamed Omni PDF.exe'
         with patch.object(updates.subprocess, "Popen") as popen:
-            updates.launch_installer("C:/temp/setup.exe", "C:/Program Files/Omni PDF", 42)
-        self.assertEqual(popen.call_args.args[0], ["C:/temp/setup.exe", "/SILENT", "/NORESTART", "/SP-", "/OMNIPDFUPDATE=1", "/OMNIPDFWAITPID=42", "/DIR=C:/Program Files/Omni PDF"])
+            updates.launch_portable_update(path, target, 42, release)
+        self.assertEqual(popen.call_args.args[0], [path, '--apply-portable-update', target, '42',
+                                                  release.version, self.digest, str(len(self.content))])
 
     def test_frozen_windows_launch_sanitizes_dll_search(self):
         from unittest.mock import Mock, call
@@ -140,7 +158,7 @@ class UpdateTests(unittest.TestCase):
              patch.object(updates.ctypes, 'windll', Mock(kernel32=kernel), create=True), \
              patch.dict(updates.os.environ, {'PATH': r'C:\Temp\bundle;C:\Temp\bundle\lib;C:\Windows'}, clear=True), \
              patch.object(updates.subprocess, 'Popen') as popen:
-            updates.launch_installer('setup.exe', 'app', 42)
+            updates.launch_portable_update(self.filename, 'app.exe', 42, self.check(self.metadata()))
         self.assertEqual(kernel.SetDllDirectoryW.call_args_list, [call(None), call(r'C:\Temp\bundle')])
         self.assertEqual(popen.call_args.kwargs['env']['PATH'], r'C:\Windows')
         self.assertEqual(popen.call_args.kwargs['env']['PYINSTALLER_RESET_ENVIRONMENT'], '1')
@@ -158,18 +176,18 @@ class UpdateTests(unittest.TestCase):
                     updates.download_update(release, folder, cancelled=lambda: True)
                 opener.assert_not_called()
 
-    def test_cached_installer_verification(self):
+    def test_cached_executable_verification(self):
         release = updates.Release("0.10.0", self.url, self.digest, len(self.content))
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / self.filename
             path.write_bytes(self.content)
-            updates.verify_installer(path, release)
+            updates.verify_update(path, release)
             path.write_bytes(b"tampered!")
             with self.assertRaises(updates.UpdateError):
-                updates.verify_installer(path, release)
+                updates.verify_update(path, release)
             path.rename(Path(folder) / "other.exe")
             with self.assertRaises(updates.UpdateError):
-                updates.verify_installer(Path(folder) / "other.exe", release)
+                updates.verify_update(Path(folder) / "other.exe", release)
 
 
 if __name__ == "__main__":

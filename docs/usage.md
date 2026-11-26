@@ -20,9 +20,11 @@ Other shortcuts: **Ctrl+O** opens a file, **Ctrl+Z** undoes, **Ctrl+Y** or **Ctr
 
 ## Updates
 
-The application menu contains the current version, a manual update check and a switch for automatic checks. In packaged builds, checks occur on startup and every six hours. When an update is available, the app asks for consent before downloading it, shows progress, and verifies the installer size and SHA-256. Downloads can be cancelled.
+The application menu contains the current version, a manual update check and a switch for automatic checks. In packaged builds, checks occur on startup and every six hours. When an update is available, the app asks for consent before downloading it, shows progress, and verifies the size and SHA-256 reported by GitHub. Downloads can be cancelled.
 
-You can defer installation. Before restarting, the app offers to save unfinished work; cancelling the save also cancels installation. The installer waits for the app to exit and starts the new version. The first update of a portable EXE installs to `%LOCALAPPDATA%\Programs\OmniPDF`; updates to an installed app keep its existing location. Source runs offer a link to the release page instead of self-installation.
+You can defer an update. Before restarting, the app offers to save unfinished work. Cancelling that prompt also cancels the update. An update replaces the EXE in its current folder and starts the new version. The folder must be writable. Source runs offer a link to the release page.
+
+If you are using a public release through v0.1.19, download the new portable EXE once to switch to in-place updates.
 
 ## Limitations
 

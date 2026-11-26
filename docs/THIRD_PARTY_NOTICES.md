@@ -47,9 +47,3 @@ https://github.com/dotnet/runtime
 PyInstaller is a build tool under GPL v2 or later with its bootloader exception,
 which permits distributing bundled applications under their own license.
 https://pyinstaller.org/en/stable/license.html
-
-## Inno Setup
-
-The Windows installer is built using Inno Setup. Copyright Jordan Russell,
-Martijn Laan and contributors. https://jrsoftware.org/isinfo.php
-Its license is included by the installer build.

@@ -23,9 +23,9 @@ Your documents stay on your computer. Print the result or save it as a PDF.
 
 ## Download
 
-Find the installer and portable app for Windows x64 on the [latest release page](https://github.com/hudakjakub/OmniPDF/releases/latest). Updates require your confirmation.
+Download `OmniPDF-windows-x64.exe` from the [latest release page](https://github.com/hudakjakub/OmniPDF/releases/latest). Run it from a writable folder to allow in-place updates after your confirmation.
 
-> Releases are currently unsigned, so Windows may block the application or installer.
+> Releases are currently unsigned, so Windows may block the application.
 
 ---
 

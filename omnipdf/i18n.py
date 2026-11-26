@@ -123,12 +123,11 @@ EN = {
     'Aktualizácie': 'Updates',
     'Nová verzia': 'New version',
     'Aktualizáciu sa nepodarilo overiť alebo stiahnuť. Skontrolujte pripojenie a skúste to znova.': 'The update could not be verified or downloaded. Check your connection and try again.',
-    'Nainštalovať aktualizáciu…': 'Install update…',
+    'Použiť aktualizáciu…': 'Apply update…',
     'Aktualizácia je pripravená': 'Update ready',
-    'Overuje sa inštalátor…': 'Verifying installer…',
+    'Overuje sa aktualizácia…': 'Verifying update…',
     'Aktualizácia': 'Update',
-    'Inštalátor sa nepodarilo bezpečne spustiť. Skúste aktualizáciu znova.': 'The installer could not be started safely. Try the update again.',
-    'Bezpečnostná politika Windows zablokovala spustenie inštalátora. Vydania Omni PDF zatiaľ nie sú digitálne podpísané; obráťte sa na vydavateľa alebo správcu počítača.': 'A Windows security policy blocked the installer. Omni PDF releases are not digitally signed yet; contact the publisher or your computer administrator.',
+    'Bezpečnostná politika Windows zablokovala aktualizáciu. Obráťte sa na správcu počítača.': 'A Windows security policy blocked the update. Contact your computer administrator.',
     'Rozpoznávanie textu': 'Text recognition',
     'Počkajte na dokončenie rozpoznávania textu.': 'Wait for text recognition to finish.',
     'Text tejto strany sa rozpozná automaticky. Môžete tiež pridať textové pole alebo zakryť oblasť.': 'Text on this page will be recognized automatically. You can also add a text box or select an area.',
@@ -169,8 +168,8 @@ EN = {
     '<b>{name} {version}</b><p>Editor PDF pre Windows.</p><p>Copyright © 2026 hudakjakub a prispievatelia.<br>GNU AGPL v3. Bez záruky. Program môžete upravovať a ďalej šíriť podľa licencie.</p><p><a href="{url}/tree/v{version}">Zdrojový kód</a> · <a href="{url}/blob/v{version}/LICENSE">Licencia</a></p>': '<b>{name} {version}</b><p>PDF editor for Windows.</p><p>Copyright © 2026 hudakjakub and contributors.<br>GNU AGPL v3. No warranty. You may modify and redistribute this program under the license.</p><p><a href="{url}/tree/v{version}">Source code</a> · <a href="{url}/blob/v{version}/LICENSE">License</a></p>',
     '{name} {version} je aktuálna verzia.': '{name} {version} is up to date.',
     'Je dostupná verzia {version}. Otvoriť stránku vydania?': 'Version {version} is available. Open the release page?',
-    'Nainštalovať Omni PDF {version} a reštartovať aplikáciu? Pred reštartom budete môcť uložiť rozpracované PDF.': 'Install Omni PDF {version} and restart the application? You can save your work before restarting.',
-    '\n\nPrenosná aplikácia sa nainštaluje do:\n{directory}\nExistujúca inštalácia v tomto priečinku sa aktualizuje. Pôvodný prenosný EXE zostane zachovaný.': '\n\nThe portable application will be installed to:\n{directory}\nAn existing installation in this folder will be updated. The original portable EXE will be kept.',
+    'Aktualizovať prenosnú aplikáciu Omni PDF na verziu {version} a reštartovať ju? Súbor EXE sa nahradí na pôvodnom mieste. Pred reštartom budete môcť uložiť rozpracované PDF.': 'Update portable Omni PDF to version {version} and restart? The EXE will be replaced in its current folder. You can save your work before restarting.',
+    'Prenosnú aktualizáciu sa nepodarilo spustiť. Skúste ju znova.': 'The portable update could not be started. Try the update again.',
 }
 
 

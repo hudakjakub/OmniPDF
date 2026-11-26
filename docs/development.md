@@ -6,7 +6,6 @@
 omnipdf/           Application, icons, PDF, OCR, printing and updates
 tests/             Automated tests
 windows_print/     Windows system print component
-packaging/         Installer configuration
 requirements/      Application and build dependencies
 scripts/           Launch, build and release verification scripts
 docs/              Documentation
@@ -23,7 +22,7 @@ py -3.14 -m venv .venv
 .venv\Scripts\python.exe -m omnipdf
 ```
 
-You can also launch the app with `scripts\run.cmd`.
+You can also double-click `OmniPDF.cmd` or run it from Command Prompt.
 
 ## Verification
 
@@ -37,7 +36,7 @@ Set `RUN_WINDOWS_OCR=1` to run the integration test against the installed Window
 
 `VERSION` in `omnipdf/app_info.py` is the source of truth for the version number, in `MAJOR.MINOR.PATCH` format. Working branches and pull requests target `main`; temporary files, virtual environments, builds and personal documents are excluded from the repository.
 
-GitHub Actions runs Windows tests on pushes to `main` and pull requests. Pushes to `main` and manual runs also produce Windows build artifacts. A `vMAJOR.MINOR.PATCH` tag runs tests, builds and verifies the portable app and installer, and creates a GitHub Release. The tag must match `VERSION` exactly; existing releases are not overwritten.
+GitHub Actions runs Windows tests on pushes to `main` and pull requests. Pushes to `main` and manual runs also build the portable EXE. A `vMAJOR.MINOR.PATCH` tag runs tests, verifies the portable app and its in-place updater, and publishes `OmniPDF-windows-x64.exe` as the release's sole uploaded asset. The tag must match `VERSION` exactly. Existing releases are preserved.
 
 To publish a release, update `omnipdf/app_info.py` and `docs/CHANGELOG.md`, test the change, merge it into `main`, then create a tag:
 
@@ -46,7 +45,7 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-A local Windows build requires Python 3.14 x64, the .NET 10 SDK and Inno Setup 6. Set `ISCC` if the installer compiler is not on its default path:
+A local Windows build requires Python 3.14 x64 and the .NET 10 SDK.
 
 ```cmd
 .venv\Scripts\python.exe -m pip install -r requirements\runtime.txt -r requirements\build.txt

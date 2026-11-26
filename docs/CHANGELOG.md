@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.20
+
+- Publish one portable Windows EXE and update it in place.
+- Launch the Python app on Windows with `OmniPDF.cmd`.
+- Upgrading from v0.1.19 or earlier requires downloading the portable EXE once.
+
 ## 0.1.19
 
 - Use the native Windows file dialogs for opening and saving documents.

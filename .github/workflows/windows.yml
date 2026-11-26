@@ -63,21 +63,21 @@ jobs:
           architecture: x64
       - name: Install dependencies
         run: python -m pip install -r requirements/runtime.txt -r requirements/build.txt
-      - name: Build portable app and installer
+      - name: Build portable EXE
         run: python scripts/build_windows.py
         env:
           RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
       - name: Prepare Windows OCR
         shell: powershell
         run: ./scripts/ensure_windows_ocr.ps1
-      - name: Verify installation and updates
+      - name: Verify the portable app and in-place updates
         shell: pwsh
         run: ./scripts/smoke_windows.ps1
-      - name: Upload packages
+      - name: Upload portable EXE
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: OmniPDF-windows-x64
-          path: release/*
+          path: release/OmniPDF-windows-x64.exe
           if-no-files-found: error
 
   release:
@@ -89,7 +89,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download packages
+      - name: Download portable EXE
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: OmniPDF-windows-x64
@@ -101,6 +101,5 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
-          $assets = @(Get-ChildItem release -File | ForEach-Object { $_.FullName })
-          gh release create $env:TAG @assets --verify-tag --title "Omni PDF" --generate-notes
+          gh release create $env:TAG release/OmniPDF-windows-x64.exe --verify-tag --title "Omni PDF" --generate-notes
           if ($LASTEXITCODE -ne 0) { throw 'Release creation failed; existing releases and assets are never overwritten.' }

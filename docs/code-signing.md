@@ -2,9 +2,7 @@
 
 ## Current status
 
-Omni PDF is applying for free code signing from SignPath Foundation. The application has not yet been approved and current releases are unsigned.
-
-If accepted, free code signing would be provided by [SignPath.io](https://signpath.io/), with a certificate provided by [SignPath Foundation](https://signpath.org/). Signed releases would identify SignPath Foundation as the publisher.
+Current Omni PDF releases are unsigned.
 
 ## Project roles
 
@@ -15,4 +13,4 @@ Project members involved in signing must use multifactor authentication for thei
 
 ## Privacy
 
-Omni PDF processes documents locally; it does not upload document contents. Packaged versions check GitHub for updates automatically on startup and periodically unless automatic checks are disabled in the application menu. A manual check also contacts GitHub. These requests expose ordinary network information, such as the user's IP address, to GitHub; see the [GitHub Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement). An installer is downloaded only after the user agrees to update.
+Omni PDF processes documents locally; it does not upload document contents. Packaged versions check GitHub for updates automatically on startup and periodically unless automatic checks are disabled in the application menu. A manual check also contacts GitHub. These requests expose ordinary network information, such as the user's IP address, to GitHub; see the [GitHub Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement). The updated EXE is downloaded after the user agrees to update.
