@@ -1,16 +1,19 @@
 <div align="center">
-  <img src="omnipdf/assets/omni.svg" width="72" alt="Omni PDF logo">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="omnipdf/assets/omni.svg">
+    <img src="omnipdf/assets/omni-light.svg" width="96" alt="Omni PDF hand-drawn pencil logo">
+  </picture>
   <h1>Omni PDF</h1>
   <p><strong>Edit PDFs simply, right on Windows.</strong></p>
   <p>No account · Local processing</p>
   <p>
     <a href="https://github.com/hudakjakub/OmniPDF/actions/workflows/windows.yml"><img src="https://github.com/hudakjakub/OmniPDF/actions/workflows/windows.yml/badge.svg?branch=main&amp;event=push" alt="Windows build status"></a>
-    <a href="https://github.com/hudakjakub/OmniPDF/releases/latest"><img src="https://img.shields.io/github/v/release/hudakjakub/OmniPDF?label=release&amp;color=087f83" alt="Latest release"></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-087f83" alt="AGPL 3.0 license"></a>
+    <a href="https://github.com/hudakjakub/OmniPDF/releases/latest"><img src="https://img.shields.io/github/v/release/hudakjakub/OmniPDF?label=release&amp;color=365f9e" alt="Latest release"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-365f9e" alt="AGPL 3.0 license"></a>
   </p>
   <p><strong><a href="https://github.com/hudakjakub/OmniPDF/releases/latest">Download for Windows ↓</a></strong> &nbsp; · &nbsp; <a href="docs/usage.md">User guide</a> &nbsp; · &nbsp; <a href="docs/development.md">Development</a></p>
   <br>
-  <img src="docs/images/omni-pdf.png" alt="Omni PDF editing a document" width="100%">
+  <img src="docs/images/omni-pdf.png" alt="Omni PDF in the blue theme with page thumbnails and the Edit text panel open" width="100%">
 </div>
 
 ## Everyday edits, made simple

@@ -1,8 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="15" fill="#087f83"/>
-  <path d="M16 19h23a3 3 0 0 1 3 3v29a3 3 0 0 1-3 3H16a3 3 0 0 1-3-3V22a3 3 0 0 1 3-3Z" fill="#fff" opacity=".25"/>
-  <path d="M23 10h15l12 12v26a3 3 0 0 1-3 3H23a3 3 0 0 1-3-3V13a3 3 0 0 1 3-3Z" fill="#fff"/>
-  <path d="M38 10v9a3 3 0 0 0 3 3h9Z" fill="#b9dddc"/>
-  <rect x="27" y="25" width="16" height="21" rx="7" fill="#087f83"/>
-  <rect x="32" y="30" width="6" height="11" rx="3" fill="#fff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <g fill="none" stroke="#bdc1c6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 43L28 94C28.5 100 31 103 37 103H87C93 103 96 100.5 97 95C99 84 100 71 99 59"/>
+    <path d="M24 43L40 28C54 26 72 26 86 28M24 43L36 42C39 42 41 40 41 37L40 28"/>
+  </g>
+  <path fill="#8ab4f8" d="M44 90L48 78C48.4 76.9 49 76 50 75L94 32L104 42L59 86C58 87 57 87.5 56 88L46 92C44.6 92.5 43.6 91.2 44 90ZM97 29L101 25C103.5 22.5 106 23 108 25L111 28C113.5 30.5 113 33 110.5 35.5L107 39Z"/>
 </svg>
